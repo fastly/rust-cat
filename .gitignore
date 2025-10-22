@@ -1,0 +1,5 @@
+.zig-cache
+*.pdf
+*~
+Cargo.lock
+target
