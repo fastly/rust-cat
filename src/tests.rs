@@ -633,3 +633,132 @@ fn test_created_token_format() {
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
     decoded.verify(key).expect("Failed to verify token");
 }
+
+#[test]
+fn test_create_verify_token_with_catu_filename(){
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+    // Create a token with CATU filename restriction
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::FILENAME,
+                catu::suffix_match("video_3.mp4"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Encode to bytes
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Verify the token can be decoded and verified
+    let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+    decoded_token.verify(key).expect("Failed to verify token");
+
+    // Verify including checking catu with a valid URI
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-east/title-1234/video_3.mp4");
+
+    token.verify_claims(&options).expect("Failed to verify token claims");
+}
+
+#[test]
+fn test_create_verify_token_with_catu_parentpath(){
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+    // Create a token with CATU filename restriction
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::PARENT_PATH,
+                catu::suffix_match("/us-east/title-1234"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Encode to bytes
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Verify the token can be decoded and verified
+    let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+    decoded_token.verify(key).expect("Failed to verify token");
+
+    // Verify including checking catu with a valid URI
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-east/title-1234/video_3.mp4");
+
+    token.verify_claims(&options).expect("Failed to verify token claims");
+}
+
+#[test]
+fn test_create_verify_token_with_catu_stem(){
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+    // Create a token with CATU filename restriction
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::STEM,
+                catu::suffix_match("video_3"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Encode to bytes
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Verify the token can be decoded and verified
+    let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+    decoded_token.verify(key).expect("Failed to verify token");
+
+    // Verify including checking catu with a valid URI
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-east/title-1234/video_3.mp4");
+
+    token.verify_claims(&options).expect("Failed to verify token claims");
+}

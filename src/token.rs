@@ -6,6 +6,8 @@ use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
 use crate::utils::{compute_hmac_sha256, current_timestamp, verify_hmac_sha256};
 use minicbor::{Decoder, Encoder};
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::path::Path;
 
 /// Common Access Token structure
 #[derive(Debug, Clone)]
@@ -235,6 +237,9 @@ impl Token {
             }
         };
 
+        // Parse the Path from the URI
+        let parsed_path = Path::new(parsed_uri.path());
+
         // Check if token has CATU claim
         let catu_claim = match self.claims.custom.get(&cat_keys::CATU) {
             Some(claim) => claim,
@@ -282,6 +287,18 @@ impl Token {
                 uri_components::QUERY => {
                     let query = parsed_uri.query().unwrap_or("").to_string();
                     self.verify_uri_component(&query, component_value, "query")?;
+                }
+                uri_components::PARENT_PATH => {
+                    let parent_path = parsed_path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("").to_string();
+                    self.verify_uri_component(&parent_path, component_value, "parent_path")?;
+                }
+                uri_components::FILENAME => {
+                    let filename = parsed_path.file_name().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
+                    self.verify_uri_component(&filename, component_value, "filename")?;
+                }
+                uri_components::STEM => {
+                    let stem = parsed_path.file_stem().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
+                    self.verify_uri_component(&stem, component_value, "stem")?;
                 }
                 uri_components::EXTENSION => {
                     // Extract file extension from path
