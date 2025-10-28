@@ -762,3 +762,283 @@ fn test_create_verify_token_with_catu_stem(){
 
     token.verify_claims(&options).expect("Failed to verify token claims");
 }
+
+#[test]
+fn test_catu_filename_mismatch() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::FILENAME,
+                catu::suffix_match("video_3.mp4"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Verify with a mismatched filename should fail
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-east/title-1234/video_5.mp4");
+
+    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched filename");
+}
+
+#[test]
+fn test_catu_parentpath_mismatch() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::PARENT_PATH,
+                catu::suffix_match("/us-east/title-1234"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Verify with a mismatched parent path should fail
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-west/title-5678/video_3.mp4");
+
+    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched parent path");
+}
+
+#[test]
+fn test_catu_stem_mismatch() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::STEM,
+                catu::suffix_match("video_3"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Verify with a mismatched stem should fail
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/us-east/title-1234/audio_1.mp4");
+
+    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched stem");
+}
+
+#[test]
+fn test_catu_filename_edge_cases() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    // Test with filename without extension
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::FILENAME,
+                catu::suffix_match("README"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/docs/README");
+
+    token.verify_claims(&options).expect("Should handle filename without extension");
+}
+
+#[test]
+fn test_catu_stem_edge_cases() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    // Test stem with file that has no extension
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::STEM,
+                catu::suffix_match("Makefile"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/project/Makefile");
+
+    token.verify_claims(&options).expect("Should handle stem without extension");
+}
+
+#[test]
+fn test_catu_parentpath_root() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    // Test parent path with file at root
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::PARENT_PATH,
+                catu::suffix_match(""),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/file.txt");
+
+    token.verify_claims(&options).expect("Should handle root-level files with empty parent path");
+}
+
+#[test]
+fn test_catu_filename_with_multiple_dots() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    // Test filename with multiple dots (e.g., archive.tar.gz)
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::FILENAME,
+                catu::suffix_match("archive.tar.gz"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/downloads/archive.tar.gz");
+
+    token.verify_claims(&options).expect("Should handle filenames with multiple dots");
+}
+
+#[test]
+fn test_catu_stem_with_multiple_dots() {
+    let key = b"testSecret";
+    let expiration = current_timestamp() + 3600;
+
+    // Test stem extraction from filename with multiple dots
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("testKid"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("fastly")
+                .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
+                .with_expiration(expiration),
+        )
+        .custom_cbor(312, catu::create({
+            let mut components = BTreeMap::new();
+            components.insert(
+                uri_components::STEM,
+                catu::suffix_match("archive.tar"),
+            );
+            components
+        }))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .require_exp(true)
+        .verify_catu(true)
+        .uri("https://example.com/downloads/archive.tar.gz");
+
+    token.verify_claims(&options).expect("Should handle stem from filenames with multiple dots");
+}

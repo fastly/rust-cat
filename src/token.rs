@@ -289,14 +289,27 @@ impl Token {
                     self.verify_uri_component(&query, component_value, "query")?;
                 }
                 uri_components::PARENT_PATH => {
+                    // Extract parent directory path from URI path.
+                    // For URI "https://example.com/a/b/file.txt", this extracts "/a/b".
+                    // For root-level files, this returns an empty string.
+                    // Non-UTF8 paths are converted to empty strings.
                     let parent_path = parsed_path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("").to_string();
                     self.verify_uri_component(&parent_path, component_value, "parent_path")?;
                 }
                 uri_components::FILENAME => {
+                    // Extract complete filename (with extension) from URI path.
+                    // For URI "https://example.com/path/video.mp4", this extracts "video.mp4".
+                    // For paths without a filename, this returns an empty string.
+                    // Non-UTF8 filenames are converted to empty strings.
                     let filename = parsed_path.file_name().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
                     self.verify_uri_component(&filename, component_value, "filename")?;
                 }
                 uri_components::STEM => {
+                    // Extract filename without extension from URI path.
+                    // For URI "https://example.com/path/video.mp4", this extracts "video".
+                    // For "archive.tar.gz", this extracts "archive.tar" (only last extension removed).
+                    // For files without extension, returns the entire filename.
+                    // Non-UTF8 stems are converted to empty strings.
                     let stem = parsed_path.file_stem().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
                     self.verify_uri_component(&stem, component_value, "stem")?;
                 }
