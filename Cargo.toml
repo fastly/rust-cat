@@ -6,6 +6,8 @@ description = "Implementation of the Common Access Token (CAT) specification"
 authors = ["Frank Denis"]
 license = "MIT"
 documentation = "https://docs.rs/common-access-token"
+homepage = "https://github.com/fastly/rust-cat"
+repository = "https://github.com/fastly/rust-cat"
 readme = "README.md"
 keywords = ["token", "authentication", "authorization", "cbor", "cose"]
 categories = ["authentication", "cryptography", "web-programming"]
@@ -13,9 +15,9 @@ rust-version = "1.60.0"
 
 [dependencies]
 minicbor = { version = "2.1.1", features = ["derive", "std"] }
-hmac-sha256 = "1.1.7"
+hmac-sha256 = "1.1.12"
 hmac-sha512 = "1.1.7"
 thiserror = "1.0.65"
-ct-codecs = "1.1.2"
+ct-codecs = "1.1.6"
 url = "2.5.2"
 regex = "1.9.6"
