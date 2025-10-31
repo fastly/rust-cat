@@ -37,6 +37,8 @@ pub mod cat_keys {
     pub const CATIF: i32 = 322;
     /// Common Access Token Renewal (catr) claim key
     pub const CATR: i32 = 323;
+    /// Common Access Token TLS Fingerprint (cattprint) claim key
+    pub const CATTPRINT: i32 = 324;
 }
 
 /// URI component identifiers for CATU claim
@@ -119,6 +121,37 @@ pub mod replay_values {
     pub const PROHIBITED: i32 = 1;
     /// Reuse-detection
     pub const REUSE_DETECTION: i32 = 2;
+}
+
+// Parameter labels for CATTPRINT claim
+pub mod tprint_params {
+    /// TLS Fingerprint Type
+    pub const FINGERPRINT_TYPE: i32 = 0;
+    /// TLS Fingerprint Value
+    pub const FINGERPRINT_VALUE: i32 = 1;
+}
+
+// Values for Fingerprint Types for CATTPRINT claims
+// Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
+pub mod tprint_type_values {
+    // JA3
+    pub const JA3: &str = "JA3";
+    // JA4
+    pub const JA4: &str = "JA4";
+    // JA4S
+    pub const JA4S: &str = "JA4S";
+    // JA4H
+    pub const JA4H: &str = "JA4H";
+    // JA4L
+    pub const JA4L: &str = "JA4L";
+    // JA4X
+    pub const JA4X: &str = "JA4X";
+    // JA4SSH
+    pub const JA4SSH: &str = "JA4SSH";
+    // JA4T
+    pub const JA4T: &str = "JA4T";
+    // JA4TScan
+    pub const JA4_TSCAN: &str = "JA4TScan";
 }
 
 /// CWT claim keys as defined in RFC 8392

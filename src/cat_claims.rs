@@ -21,6 +21,7 @@
 //! - **CATDPOP** (Common Access Token DPoP Settings) - DPoP configuration
 //! - **CATIF** (Common Access Token If) - conditional logic
 //! - **CATIFDATA** (Common Access Token If Data) - data for conditional evaluation
+//! - **CATTPRINT** (Common Access Token TLS Fingerprint) - TLS fingerprint restrictions
 //!
 //! ## CATU Claim (URI Validation)
 //!
@@ -98,6 +99,19 @@
 //!     Some(vec!["Secure", "HttpOnly"])
 //! );
 //! ```
+//!
+//! ## CATTPRINT Claim (TLS Fingerprint)
+//!
+//! The CATTPRINT claim provides instructions for validating a TLS Fingerprint:
+//!
+//! ```rust
+//! use common_access_token::{cattprint, tprint_type_values};
+//!
+//! // Create a tls fingerprint claim
+//! // Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
+//! // Example JA4 value: t13d1516h2_8daaf6152771_b186095e22b6
+//! let cattprint_claim = cattprint::create(tprint_type_values::JA4, "t13d1516h2_8daaf6152771_b186095e22b6");
+//! ```
 
 use crate::header::CborValue;
 use std::collections::BTreeMap;
@@ -138,7 +152,23 @@ pub mod keys {
     pub const CATIF: i32 = cat_keys::CATIF;
     /// Common Access Token Renewal (catr) claim key
     pub const CATR: i32 = cat_keys::CATR;
+    /// Common Access Token TLS Fingerprint (cattprint) claim key
+    pub const CATTPRINT: i32 = cat_keys::CATTPRINT;
 }
+
+/// Helper functions for creating CATTPRINT (Common Access Token TLS Fingerprint) claims
+pub mod cattprint {
+    use super::*;
+    use crate::constants::{tprint_params};
+
+    pub fn create(fingerprint_type: &str, fingerprint_value: &str) -> CborValue {
+        let mut params = BTreeMap::new();
+        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Text(fingerprint_type.to_string()));
+        params.insert(tprint_params::FINGERPRINT_VALUE, CborValue::Text(fingerprint_value.to_string()));
+        CborValue::Map(params)
+    }
+}
+
 
 /// Helper functions for creating CATU (Common Access Token URI) claims
 pub mod catu {

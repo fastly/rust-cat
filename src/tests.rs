@@ -1,9 +1,9 @@
 //! Tests for Common Access Token
 
 use crate::{
-    cat_keys, catm, catr, catreplay, catu,
+    cat_keys, catm, catr, catreplay, catu, cattprint,
     claims::RegisteredClaims,
-    constants::uri_components,
+    constants::{uri_components, tprint_type_values},
     header::{Algorithm, CborValue, KeyId},
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
@@ -1041,4 +1041,52 @@ fn test_catu_stem_with_multiple_dots() {
         .uri("https://example.com/downloads/archive.tar.gz");
 
     token.verify_claims(&options).expect("Should handle stem from filenames with multiple dots");
+}
+
+#[test]
+fn test_cattprint_token() {
+    let key = b"test-key-for-hmac-sha256-algorithm";
+    let test_fingerprint_type = tprint_type_values::JA4;
+    let test_fingerprint_value = "t13d1516h2_8daaf6152771_b186095e22b6";
+
+    // Create a token with CATTPRINT claim
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_expiration(current_timestamp() + 3600),
+        )
+        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Extract and verify the CATTPRINT claim
+    if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
+        use crate::constants::{tprint_params};
+
+        // Check fingerprint type
+        if let Some(CborValue::Text(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+            assert_eq!(*fingerprint_type, test_fingerprint_type);
+        } else {
+            panic!("Missing or invalid renewal type");
+        }
+
+        // Check fingerprint value
+        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+            assert_eq!(*fingerprint_value, test_fingerprint_value); // Automatic renewal
+        } else {
+            panic!("Missing or invalid renewal type");
+        }
+    } else {
+        panic!("Missing or invalid CATTPRINT claim");
+    }
+
+    // Test valid TLS Fingerprint
+    let options = VerificationOptions::new()
+        .verify_cattprint(true)
+        .fingerprint_type(test_fingerprint_type)
+        .fingerprint_value(test_fingerprint_value);
+
+    assert!(token.verify_claims(&options).is_ok());
 }
