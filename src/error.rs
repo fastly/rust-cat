@@ -70,6 +70,10 @@ pub enum Error {
     #[error("Token replay violation: {0}")]
     ReplayViolation(String),
 
+    /// Invalid TLS Fingerprint claim
+    #[error("Invalid TLS Fingerprint claim: {0}")]
+    InvalidTLSFingerprintClaim(String),
+
     /// Other error
     #[error("Other error: {0}")]
     Other(String),
