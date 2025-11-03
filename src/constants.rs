@@ -150,8 +150,10 @@ pub mod tprint_type_values {
     pub const JA4SSH: &str = "JA4SSH";
     // JA4T
     pub const JA4T: &str = "JA4T";
+    // JA4TS
+    pub const JA4TS: &str = "JA4TS";
     // JA4TScan
-    pub const JA4_TSCAN: &str = "JA4TScan";
+    pub const JA4TSCAN: &str = "JA4TScan";
 }
 
 /// CWT claim keys as defined in RFC 8392
