@@ -1074,7 +1074,7 @@ fn test_cattprint_token() {
 
         // Check fingerprint value
         if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
-            assert_eq!(*fingerprint_value, test_fingerprint_value); // Automatic renewal
+            assert_eq!(*fingerprint_value, test_fingerprint_value);
         } else {
             panic!("Missing or invalid renewal type");
         }

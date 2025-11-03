@@ -586,10 +586,10 @@ impl Token {
         // Check if token has CATTPRINT claim
         let cattprint_claim = match self.claims.custom.get(&cat_keys::CATTPRINT) {
             Some(claim) => claim,
-            None => return Ok(()), // No CATM claim, so nothing to verify
+            None => return Ok(()), // No CATTPRINT claim, so nothing to verify
         };
 
-        // CATTPRINT claim should be an map of 2 values methods
+        // CATTPRINT claim should be a map of 2 values
         let cattprint_map = match cattprint_claim {
             CborValue::Map(cattprint_map) => cattprint_map,
             _ => {
