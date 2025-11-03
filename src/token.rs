@@ -582,7 +582,6 @@ impl Token {
             }
         };
 
-
         // Check if token has CATTPRINT claim
         let cattprint_claim = match self.claims.custom.get(&cat_keys::CATTPRINT) {
             Some(claim) => claim,

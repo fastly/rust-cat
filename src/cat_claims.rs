@@ -169,7 +169,6 @@ pub mod cattprint {
     }
 }
 
-
 /// Helper functions for creating CATU (Common Access Token URI) claims
 pub mod catu {
     use super::*;
