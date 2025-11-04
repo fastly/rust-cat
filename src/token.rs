@@ -1037,7 +1037,7 @@ pub struct VerificationOptions {
     pub verify_catreplay: bool,
     /// Whether the token has been seen before (for replay protection)
     pub token_seen_before: bool,
-    /// Verify CAT-specific URI claim (CATTPRINT) against provided Fingerprint Type and Value
+    /// Verify CAT-specific TLS Fingerprint claim (CATTPRINT) against provided Fingerprint Type and Value
     pub verify_cattprint: bool,
     /// Fingerprint Type to verify against CATTPRINT claim
     pub fingerprint_type: Option<String>,
