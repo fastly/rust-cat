@@ -5,6 +5,7 @@ use crate::constants::tprint_params;
 use crate::error::Error;
 use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
 use crate::utils::{compute_hmac_sha256, current_timestamp, verify_hmac_sha256};
+use crate::FingerprintType;
 use minicbor::{Decoder, Encoder};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -599,10 +600,9 @@ impl Token {
         };
 
         // Check if the provided Fingerprint Type matches
-        let fingerprint_type_upper = fingerprint_type.to_uppercase();
         let claim_fingerprint_type = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE);
-        if let Some(CborValue::Text(claim_type)) = claim_fingerprint_type {
-            if claim_type.to_uppercase() != fingerprint_type_upper {
+        if let Some(CborValue::Integer(claim_type)) = claim_fingerprint_type {
+            if *claim_type != (*fingerprint_type as i64) {
                 return Err(Error::InvalidTLSFingerprintClaim(format!(
                     "TLS Fingerprint Type '{}' does not match required value '{}'",
                     claim_type, fingerprint_type
@@ -1040,7 +1040,7 @@ pub struct VerificationOptions {
     /// Verify CAT-specific URI claim (CATTPRINT) against provided Fingerprint Type and Value
     pub verify_cattprint: bool,
     /// Fingerprint Type to verify against CATTPRINT claim
-    pub fingerprint_type: Option<String>,
+    pub fingerprint_type: Option<FingerprintType>,
     /// Fingerprint Value to verify against CATTPRINT claim
     pub fingerprint_value: Option<String>,
 }
@@ -1153,8 +1153,8 @@ impl VerificationOptions {
     }
 
     /// Set fingerprint type to verify for the CATTPRINT claim
-    pub fn fingerprint_type<S: Into<String>>(mut self, fingerprint_type: S) -> Self {
-        self.fingerprint_type = Some(fingerprint_type.into());
+    pub fn fingerprint_type(mut self, fingerprint_type: FingerprintType) -> Self {
+        self.fingerprint_type = Some(fingerprint_type);
         self
     }
 
