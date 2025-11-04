@@ -131,30 +131,80 @@ pub mod tprint_params {
     pub const FINGERPRINT_VALUE: i32 = 1;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)] // Use u8 as it's efficient for < 256 variants
+pub enum FingerprintType {
+    JA3 = 0,
+    JA3S = 1,
+    JA4 = 2,
+    JA4S = 3,
+    JA4H = 4,
+    JA4L = 5,
+    JA4X = 6,
+    JA4SSH = 7,
+    JA4T = 8,
+    JA4TS = 9,
+    JA4TSCAN = 10,
+    JA4D = 11,
+    JA4D6 = 12,
+}
+
+impl FingerprintType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FingerprintType::JA3 => "JA3",
+            FingerprintType::JA3S => "JA3S",
+            FingerprintType::JA4 => "JA4",
+            FingerprintType::JA4S => "JA4S",
+            FingerprintType::JA4H => "JA4H",
+            FingerprintType::JA4L => "JA4L",
+            FingerprintType::JA4X => "JA4X",
+            FingerprintType::JA4SSH => "JA4SSH",
+            FingerprintType::JA4T => "JA4T",
+            FingerprintType::JA4TS => "JA4TS",
+            FingerprintType::JA4TSCAN => "JA4TScan", 
+            FingerprintType::JA4D => "JA4D",
+            FingerprintType::JA4D6 => "JA4D6",
+        }
+    }
+}
+
+impl std::fmt::Display for FingerprintType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 // Values for Fingerprint Types for CATTPRINT claims
 // Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
-pub mod tprint_type_values {
-    // JA3
-    pub const JA3: &str = "JA3";
-    // JA4
-    pub const JA4: &str = "JA4";
-    // JA4S
-    pub const JA4S: &str = "JA4S";
-    // JA4H
-    pub const JA4H: &str = "JA4H";
-    // JA4L
-    pub const JA4L: &str = "JA4L";
-    // JA4X
-    pub const JA4X: &str = "JA4X";
-    // JA4SSH
-    pub const JA4SSH: &str = "JA4SSH";
-    // JA4T
-    pub const JA4T: &str = "JA4T";
-    // JA4TS
-    pub const JA4TS: &str = "JA4TS";
-    // JA4TScan
-    pub const JA4TSCAN: &str = "JA4TScan";
-}
+// pub mod tprint_type_values {
+//     // JA3
+//     pub const JA3: &str = "JA3";
+//     // JA3S
+//     pub const JA3S: &str = "JA3S";
+//     // JA4
+//     pub const JA4: &str = "JA4";
+//     // JA4S
+//     pub const JA4S: &str = "JA4S";
+//     // JA4H
+//     pub const JA4H: &str = "JA4H";
+//     // JA4L
+//     pub const JA4L: &str = "JA4L";
+//     // JA4X
+//     pub const JA4X: &str = "JA4X";
+//     // JA4SSH
+//     pub const JA4SSH: &str = "JA4SSH";
+//     // JA4T
+//     pub const JA4T: &str = "JA4T";
+//     // JA4TS
+//     pub const JA4TS: &str = "JA4TS";
+//     // JA4TScan
+//     pub const JA4TSCAN: &str = "JA4TScan";
+//     // JA4D
+//     pub const JA4D: &str = "JA4D";
+//     // JA4D6
+//     pub const JA4D6: &str = "JA4D6";
+// }
 
 /// CWT claim keys as defined in RFC 8392
 pub mod cwt_keys {

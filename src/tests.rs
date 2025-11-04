@@ -3,7 +3,7 @@
 use crate::{
     cat_keys, catm, catr, catreplay, catu, cattprint,
     claims::RegisteredClaims,
-    constants::{uri_components, tprint_type_values},
+    constants::{uri_components, FingerprintType},
     header::{Algorithm, CborValue, KeyId},
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
@@ -1046,7 +1046,7 @@ fn test_catu_stem_with_multiple_dots() {
 #[test]
 fn test_cattprint_token() {
     let key = b"test-key-for-hmac-sha256-algorithm";
-    let test_fingerprint_type = tprint_type_values::JA4;
+    let test_fingerprint_type = FingerprintType::JA4;
     let test_fingerprint_value = "t13d1516h2_8daaf6152771_b186095e22b6";
 
     // Create a token with CATTPRINT claim
@@ -1066,8 +1066,8 @@ fn test_cattprint_token() {
         use crate::constants::{tprint_params};
 
         // Check fingerprint type
-        if let Some(CborValue::Text(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
-            assert_eq!(*fingerprint_type, test_fingerprint_type);
+        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+            assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
         } else {
             panic!("Missing or invalid fingerprint type");
         }

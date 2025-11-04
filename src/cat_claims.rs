@@ -159,11 +159,11 @@ pub mod keys {
 /// Helper functions for creating CATTPRINT (Common Access Token TLS Fingerprint) claims
 pub mod cattprint {
     use super::*;
-    use crate::constants::{tprint_params};
+    use crate::{constants::tprint_params, FingerprintType};
 
-    pub fn create(fingerprint_type: &str, fingerprint_value: &str) -> CborValue {
+    pub fn create(fingerprint_type: FingerprintType, fingerprint_value: &str) -> CborValue {
         let mut params = BTreeMap::new();
-        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Text(fingerprint_type.to_string()));
+        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Integer(fingerprint_type as i64));
         params.insert(tprint_params::FINGERPRINT_VALUE, CborValue::Text(fingerprint_value.to_string()));
         CborValue::Map(params)
     }

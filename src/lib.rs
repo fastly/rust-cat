@@ -145,7 +145,7 @@ pub use cat_claims::{
 pub use claims::{Claims, RegisteredClaims};
 pub use constants::{
     cat_keys, cose_algs, cose_labels, cwt_keys, match_types, renewal_params, renewal_types,
-    replay_values, uri_components, tprint_params, tprint_type_values
+    replay_values, uri_components, tprint_params, FingerprintType
 };
 pub use error::Error;
 pub use header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
