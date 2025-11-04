@@ -67,7 +67,8 @@
 //! ```rust
 //! use common_access_token::{
 //!     Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerificationOptions,
-//!     cat_keys, catm, catr, catreplay, catu, uri_components, current_timestamp
+//!     cat_keys, catm, catr, catreplay, catu, uri_components, current_timestamp,
+//!     cattprint, tprint_type_values
 //! };
 //! use std::collections::BTreeMap;
 //!
@@ -100,6 +101,7 @@
 //!     .custom_cbor(cat_keys::CATU, catu::create(catu_components))
 //!     .custom_array(cat_keys::CATM, catm::create(allowed_methods))
 //!     .custom_cbor(cat_keys::CATREPLAY, catreplay::prohibited())
+//!     .custom_cbor(cat_keys::CATTPRINT, cattprint::create(tprint_type_values::JA4, "t13d1516h2_8daaf6152771_b186095e22b6"))
 //!     .sign(key)
 //!     .expect("Failed to sign token");
 //!
@@ -138,12 +140,12 @@ pub mod utils;
 
 pub use cat_claims::{
     catalpn, catdpop, catgeoalt, catgeocoord, catgeoiso3166, cath, catif, catifdata, catm, catnip,
-    catpor, catr, catreplay, cattpk, catu, catv,
+    catpor, catr, catreplay, cattpk, catu, catv, cattprint,
 };
 pub use claims::{Claims, RegisteredClaims};
 pub use constants::{
     cat_keys, cose_algs, cose_labels, cwt_keys, match_types, renewal_params, renewal_types,
-    replay_values, uri_components,
+    replay_values, uri_components, tprint_params, tprint_type_values
 };
 pub use error::Error;
 pub use header::{Algorithm, CborValue, Header, HeaderMap, KeyId};

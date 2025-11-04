@@ -1,6 +1,7 @@
 //! Token implementation for Common Access Token
 
 use crate::claims::{Claims, RegisteredClaims};
+use crate::constants::tprint_params;
 use crate::error::Error;
 use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
 use crate::utils::{compute_hmac_sha256, current_timestamp, verify_hmac_sha256};
@@ -207,6 +208,10 @@ impl Token {
 
         if options.verify_catreplay {
             self.verify_catreplay_claim(options)?;
+        }
+
+        if options.verify_cattprint {
+            self.verify_cattprint_claim(options)?;
         }
 
         Ok(())
@@ -551,6 +556,81 @@ impl Token {
                 "Invalid CATREPLAY value: {replay_value}"
             ))),
         }
+    }
+
+    /// Verify the CATTPRINT (TLS Fingerprint) claim against the provided fingerprint type and value
+    fn verify_cattprint_claim(&self, options: &VerificationOptions) -> Result<(), Error> {
+        use crate::constants::cat_keys;
+
+        // Get the Fingerprint type to verify against
+        let fingerprint_type = match &options.fingerprint_type {
+            Some(fingerprint_type) => fingerprint_type,
+            None => {
+                return Err(Error::InvalidClaimValue(
+                    "No Fingerprint Type provided for CATTPRINT verification".to_string(),
+                ))
+            }
+        };
+
+        // Get the Fingerprint value to verify against
+        let fingerprint_value = match &options.fingerprint_value {
+            Some(fingerprint_value) => fingerprint_value,
+            None => {
+                return Err(Error::InvalidClaimValue(
+                    "No Fingerprint Value provided for CATTPRINT verification".to_string(),
+                ))
+            }
+        };
+
+        // Check if token has CATTPRINT claim
+        let cattprint_claim = match self.claims.custom.get(&cat_keys::CATTPRINT) {
+            Some(claim) => claim,
+            None => return Ok(()), // No CATTPRINT claim, so nothing to verify
+        };
+
+        // CATTPRINT claim should be a map of 2 values
+        let cattprint_map = match cattprint_claim {
+            CborValue::Map(cattprint_map) => cattprint_map,
+            _ => {
+                return Err(Error::InvalidTLSFingerprintClaim(
+                    "CATTPRINT claim is not a map".to_string(),
+                ))
+            }
+        };
+
+        // Check if the provided Fingerprint Type matches
+        let fingerprint_type_upper = fingerprint_type.to_uppercase();
+        let claim_fingerprint_type = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE);
+        if let Some(CborValue::Text(claim_type)) = claim_fingerprint_type {
+            if claim_type.to_uppercase() != fingerprint_type_upper {
+                return Err(Error::InvalidTLSFingerprintClaim(format!(
+                    "TLS Fingerprint Type '{}' does not match required value '{}'",
+                    claim_type, fingerprint_type
+                )));
+            }
+        } else {
+            return Err(Error::InvalidTLSFingerprintClaim(
+                "Missing or invalid Fingerprint Type in CATTPRINT claim".to_string(),
+            ));
+        }
+
+        // Check if the provided Fingerprint Value matches
+        let fingerprint_value_upper = fingerprint_value.to_uppercase();
+        let claim_fingerprint_value = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE);
+        if let Some(CborValue::Text(claim_value)) = claim_fingerprint_value {
+            if claim_value.to_uppercase() != fingerprint_value_upper {
+                return Err(Error::InvalidTLSFingerprintClaim(format!(
+                    "TLS Fingerprint Value '{}' does not match required value '{}'",
+                    claim_value, fingerprint_value
+                )));
+            }
+        } else {
+            return Err(Error::InvalidTLSFingerprintClaim(
+                "Missing or invalid Fingerprint Value in CATTPRINT claim".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     // Note: signature_input method removed as we now use mac0_input for HMAC algorithms
@@ -957,6 +1037,12 @@ pub struct VerificationOptions {
     pub verify_catreplay: bool,
     /// Whether the token has been seen before (for replay protection)
     pub token_seen_before: bool,
+    /// Verify CAT-specific TLS Fingerprint claim (CATTPRINT) against provided Fingerprint Type and Value
+    pub verify_cattprint: bool,
+    /// Fingerprint Type to verify against CATTPRINT claim
+    pub fingerprint_type: Option<String>,
+    /// Fingerprint Value to verify against CATTPRINT claim
+    pub fingerprint_value: Option<String>,
 }
 
 impl VerificationOptions {
@@ -976,6 +1062,9 @@ impl VerificationOptions {
             http_method: None,
             verify_catreplay: false,
             token_seen_before: false,
+            verify_cattprint: false,
+            fingerprint_type: None,
+            fingerprint_value: None,
         }
     }
 
@@ -1054,6 +1143,24 @@ impl VerificationOptions {
     /// Set whether the token has been seen before (for replay protection)
     pub fn token_seen_before(mut self, seen: bool) -> Self {
         self.token_seen_before = seen;
+        self
+    }
+
+    /// Set whether to verify CAT-specific TLS Fingerprint claim (CATTPRINT)
+    pub fn verify_cattprint(mut self, verify: bool) -> Self {
+        self.verify_cattprint = verify;
+        self
+    }
+
+    /// Set fingerprint type to verify for the CATTPRINT claim
+    pub fn fingerprint_type<S: Into<String>>(mut self, fingerprint_type: S) -> Self {
+        self.fingerprint_type = Some(fingerprint_type.into());
+        self
+    }
+
+    /// Set fingerprint value to verify for the CATTPRINT claim
+    pub fn fingerprint_value<S: Into<String>>(mut self, fingerprint_value: S) -> Self {
+        self.fingerprint_value = Some(fingerprint_value.into());
         self
     }
 }
