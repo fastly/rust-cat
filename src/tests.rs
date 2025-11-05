@@ -1090,3 +1090,122 @@ fn test_cattprint_token() {
 
     assert!(token.verify_claims(&options).is_ok());
 }
+
+#[test]
+fn test_cattprint_token_fingerprint_type_not_match() {
+    let key = b"test-key-for-hmac-sha256-algorithm";
+    let test_fingerprint_type = FingerprintType::JA4;
+    let test_fingerprint_value = "t13d1516h2_8daaf6152771_b186095e22b6";
+
+    // Create a token with CATTPRINT claim
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_expiration(current_timestamp() + 3600),
+        )
+        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Extract and verify the CATTPRINT claim
+    if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
+        use crate::constants::{tprint_params};
+
+        // Check fingerprint type
+        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+            assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
+        } else {
+            panic!("Missing or invalid fingerprint type");
+        }
+
+        // Check fingerprint value
+        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+            assert_eq!(*fingerprint_value, test_fingerprint_value);
+        } else {
+            panic!("Missing or invalid fingerprint value");
+        }
+    } else {
+        panic!("Missing or invalid CATTPRINT claim");
+    }
+
+    // Test valid TLS Fingerprint
+    let options = VerificationOptions::new()
+        .verify_cattprint(true)
+        .fingerprint_type(FingerprintType::JA3)
+        .fingerprint_value(test_fingerprint_value);
+
+    let result = token.verify_claims(&options);
+    assert!(result.is_err(), "Expected error due to fingerprint type mismatch");
+    match result {
+        Err(crate::Error::InvalidTLSFingerprintClaim(msg)) => {
+            assert_eq!(
+                msg,
+                "TLS Fingerprint Type 'JA4' does not match required value 'JA3'",
+                "Error message does not match expected value"
+            );
+        } // Expected
+        _ => panic!("Expected InvalidTLSFingerprintClaim error"),
+    }
+}
+
+#[test]
+fn test_cattprint_token_fingerprint_value_not_match() {
+    let key = b"test-key-for-hmac-sha256-algorithm";
+    let test_fingerprint_type = FingerprintType::JA4;
+    let test_fingerprint_value = "t13d1516h2_8daaf6152771_b186095e22b6";
+
+    // Create a token with CATTPRINT claim
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_expiration(current_timestamp() + 3600),
+        )
+        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Extract and verify the CATTPRINT claim
+    if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
+        use crate::constants::{tprint_params};
+
+        // Check fingerprint type
+        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+            assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
+        } else {
+            panic!("Missing or invalid fingerprint type");
+        }
+
+        // Check fingerprint value
+        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+            assert_eq!(*fingerprint_value, test_fingerprint_value);
+        } else {
+            panic!("Missing or invalid fingerprint value");
+        }
+    } else {
+        panic!("Missing or invalid CATTPRINT claim");
+    }
+
+    // Test valid TLS Fingerprint
+    let test_fingerprint_value_not_match = "t65a1516h2_8daaf6152771_b186095e22d3";
+    let options = VerificationOptions::new()
+        .verify_cattprint(true)
+        .fingerprint_type(test_fingerprint_type)
+        .fingerprint_value(test_fingerprint_value_not_match);
+
+    let result = token.verify_claims(&options);
+    assert!(result.is_err(), "Expected error due to fingerprint type mismatch");
+    match result {
+        Err(crate::Error::InvalidTLSFingerprintClaim(msg)) => {
+            assert_eq!(
+                msg,
+                "TLS Fingerprint Value 't13d1516h2_8daaf6152771_b186095e22b6' does not match required value 't65a1516h2_8daaf6152771_b186095e22d3'",
+                "Error message does not match expected value"
+            );
+        } // Expected
+        _ => panic!("Expected InvalidTLSFingerprintClaim error"),
+    }
+}

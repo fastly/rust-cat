@@ -105,12 +105,12 @@
 //! The CATTPRINT claim provides instructions for validating a TLS Fingerprint:
 //!
 //! ```rust
-//! use common_access_token::{cattprint, tprint_type_values};
+//! use common_access_token::{cattprint, FingerprintType};
 //!
 //! // Create a tls fingerprint claim
 //! // Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
 //! // Example JA4 value: t13d1516h2_8daaf6152771_b186095e22b6
-//! let cattprint_claim = cattprint::create(tprint_type_values::JA4, "t13d1516h2_8daaf6152771_b186095e22b6");
+//! let cattprint_claim = cattprint::create(FingerprintType::JA4, "t13d1516h2_8daaf6152771_b186095e22b6");
 //! ```
 
 use crate::header::CborValue;
