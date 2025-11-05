@@ -105,12 +105,12 @@
 //! The CATTPRINT claim provides instructions for validating a TLS Fingerprint:
 //!
 //! ```rust
-//! use common_access_token::{cattprint, tprint_type_values};
+//! use common_access_token::{cattprint, FingerprintType};
 //!
 //! // Create a tls fingerprint claim
 //! // Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
 //! // Example JA4 value: t13d1516h2_8daaf6152771_b186095e22b6
-//! let cattprint_claim = cattprint::create(tprint_type_values::JA4, "t13d1516h2_8daaf6152771_b186095e22b6");
+//! let cattprint_claim = cattprint::create(FingerprintType::JA4, "t13d1516h2_8daaf6152771_b186095e22b6");
 //! ```
 
 use crate::header::CborValue;
@@ -159,11 +159,11 @@ pub mod keys {
 /// Helper functions for creating CATTPRINT (Common Access Token TLS Fingerprint) claims
 pub mod cattprint {
     use super::*;
-    use crate::constants::{tprint_params};
+    use crate::{constants::tprint_params, FingerprintType};
 
-    pub fn create(fingerprint_type: &str, fingerprint_value: &str) -> CborValue {
+    pub fn create(fingerprint_type: FingerprintType, fingerprint_value: &str) -> CborValue {
         let mut params = BTreeMap::new();
-        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Text(fingerprint_type.to_string()));
+        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Integer(fingerprint_type as i64));
         params.insert(tprint_params::FINGERPRINT_VALUE, CborValue::Text(fingerprint_value.to_string()));
         CborValue::Map(params)
     }
