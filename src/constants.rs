@@ -175,37 +175,6 @@ impl std::fmt::Display for FingerprintType {
     }
 }
 
-// Values for Fingerprint Types for CATTPRINT claims
-// Possible fingerprint-type values: JA3, JA4, JA4S, JA4H, JA4L, JA4X, JA4SSH, JA4T, JA4TS, JA4TScan
-// pub mod tprint_type_values {
-//     // JA3
-//     pub const JA3: &str = "JA3";
-//     // JA3S
-//     pub const JA3S: &str = "JA3S";
-//     // JA4
-//     pub const JA4: &str = "JA4";
-//     // JA4S
-//     pub const JA4S: &str = "JA4S";
-//     // JA4H
-//     pub const JA4H: &str = "JA4H";
-//     // JA4L
-//     pub const JA4L: &str = "JA4L";
-//     // JA4X
-//     pub const JA4X: &str = "JA4X";
-//     // JA4SSH
-//     pub const JA4SSH: &str = "JA4SSH";
-//     // JA4T
-//     pub const JA4T: &str = "JA4T";
-//     // JA4TS
-//     pub const JA4TS: &str = "JA4TS";
-//     // JA4TScan
-//     pub const JA4TSCAN: &str = "JA4TScan";
-//     // JA4D
-//     pub const JA4D: &str = "JA4D";
-//     // JA4D6
-//     pub const JA4D6: &str = "JA4D6";
-// }
-
 /// CWT claim keys as defined in RFC 8392
 pub mod cwt_keys {
     /// Issuer claim key
