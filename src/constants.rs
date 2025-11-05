@@ -132,7 +132,7 @@ pub mod tprint_params {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)] // Use u8 as it's efficient for < 256 variants
+#[repr(i64)] // Use i64 to match CBOR Integer type used in serialization
 pub enum FingerprintType {
     JA3 = 0,
     JA3S = 1,
