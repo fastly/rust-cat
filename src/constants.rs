@@ -167,6 +167,25 @@ impl FingerprintType {
             FingerprintType::JA4D6 => "JA4D6",
         }
     }
+
+    pub fn from_i64(val: i64) -> Option<Self> {
+        match val {
+            0 => Some(FingerprintType::JA3),
+            1 => Some(FingerprintType::JA3S),
+            2 => Some(FingerprintType::JA4),
+            3 => Some(FingerprintType::JA4S),
+            4 => Some(FingerprintType::JA4H),
+            5 => Some(FingerprintType::JA4L),
+            6 => Some(FingerprintType::JA4X),
+            7 => Some(FingerprintType::JA4SSH),
+            8 => Some(FingerprintType::JA4T),
+            9 => Some(FingerprintType::JA4TS),
+            10 => Some(FingerprintType::JA4TSCAN),
+            11 => Some(FingerprintType::JA4D),
+            12 => Some(FingerprintType::JA4D6),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for FingerprintType {

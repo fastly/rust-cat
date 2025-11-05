@@ -603,9 +603,13 @@ impl Token {
         let claim_fingerprint_type = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE);
         if let Some(CborValue::Integer(claim_type)) = claim_fingerprint_type {
             if *claim_type != (*fingerprint_type as i64) {
+                // Convert claim_type (i64) to FingerprintType for human-readable name
+                let claim_type_name = FingerprintType::from_i64(*claim_type)
+                    .map(|ft| ft.as_str())
+                    .unwrap_or("<unknown>");
                 return Err(Error::InvalidTLSFingerprintClaim(format!(
                     "TLS Fingerprint Type '{}' does not match required value '{}'",
-                    claim_type, fingerprint_type
+                    claim_type_name, fingerprint_type.as_str()
                 )));
             }
         } else {
@@ -615,10 +619,10 @@ impl Token {
         }
 
         // Check if the provided Fingerprint Value matches
-        let fingerprint_value_upper = fingerprint_value.to_uppercase();
+        let fingerprint_value_upper = fingerprint_value.to_lowercase();
         let claim_fingerprint_value = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE);
         if let Some(CborValue::Text(claim_value)) = claim_fingerprint_value {
-            if claim_value.to_uppercase() != fingerprint_value_upper {
+            if claim_value.to_lowercase() != fingerprint_value_upper {
                 return Err(Error::InvalidTLSFingerprintClaim(format!(
                     "TLS Fingerprint Value '{}' does not match required value '{}'",
                     claim_value, fingerprint_value
