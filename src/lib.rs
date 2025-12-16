@@ -140,12 +140,12 @@ pub mod utils;
 
 pub use cat_claims::{
     catalpn, catdpop, catgeoalt, catgeocoord, catgeoiso3166, cath, catif, catifdata, catm, catnip,
-    catpor, catr, catreplay, cattpk, catu, catv, cattprint,
+    catpor, catr, catreplay, cattpk, cattprint, catu, catv,
 };
 pub use claims::{Claims, RegisteredClaims};
 pub use constants::{
     cat_keys, cose_algs, cose_labels, cwt_keys, match_types, renewal_params, renewal_types,
-    replay_values, uri_components, tprint_params, FingerprintType
+    replay_values, tprint_params, uri_components, FingerprintType,
 };
 pub use error::Error;
 pub use header::{Algorithm, CborValue, Header, HeaderMap, KeyId};

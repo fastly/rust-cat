@@ -162,7 +162,7 @@ impl FingerprintType {
             FingerprintType::JA4SSH => "JA4SSH",
             FingerprintType::JA4T => "JA4T",
             FingerprintType::JA4TS => "JA4TS",
-            FingerprintType::JA4TSCAN => "JA4TScan", 
+            FingerprintType::JA4TSCAN => "JA4TScan",
             FingerprintType::JA4D => "JA4D",
             FingerprintType::JA4D6 => "JA4D6",
         }

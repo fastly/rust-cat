@@ -299,7 +299,12 @@ impl Token {
                     // For URI "https://example.com/a/b/file.txt", this extracts "/a/b".
                     // For root-level files, this returns an empty string.
                     // Non-UTF8 paths are converted to empty strings.
-                    let parent_path = parsed_path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("").to_string();
+                    let parent_path = parsed_path
+                        .parent()
+                        .unwrap_or(Path::new(""))
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string();
                     self.verify_uri_component(&parent_path, component_value, "parent_path")?;
                 }
                 uri_components::FILENAME => {
@@ -307,7 +312,12 @@ impl Token {
                     // For URI "https://example.com/path/video.mp4", this extracts "video.mp4".
                     // For paths without a filename, this returns an empty string.
                     // Non-UTF8 filenames are converted to empty strings.
-                    let filename = parsed_path.file_name().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
+                    let filename = parsed_path
+                        .file_name()
+                        .unwrap_or(OsStr::new(""))
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string();
                     self.verify_uri_component(&filename, component_value, "filename")?;
                 }
                 uri_components::STEM => {
@@ -316,7 +326,12 @@ impl Token {
                     // For "archive.tar.gz", this extracts "archive.tar" (only last extension removed).
                     // For files without extension, returns the entire filename.
                     // Non-UTF8 stems are converted to empty strings.
-                    let stem = parsed_path.file_stem().unwrap_or(OsStr::new("")).to_str().unwrap_or("").to_string();
+                    let stem = parsed_path
+                        .file_stem()
+                        .unwrap_or(OsStr::new(""))
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string();
                     self.verify_uri_component(&stem, component_value, "stem")?;
                 }
                 uri_components::EXTENSION => {
@@ -609,7 +624,8 @@ impl Token {
                     .unwrap_or("<unknown>");
                 return Err(Error::InvalidTLSFingerprintClaim(format!(
                     "TLS Fingerprint Type '{}' does not match required value '{}'",
-                    claim_type_name, fingerprint_type.as_str()
+                    claim_type_name,
+                    fingerprint_type.as_str()
                 )));
             }
         } else {
@@ -1463,6 +1479,14 @@ fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
             // Unsigned integer value
             let i = dec.u64()? as i64;
             CborValue::Integer(i)
+        } else if datatype == minicbor::data::Type::I8
+            || datatype == minicbor::data::Type::I16
+            || datatype == minicbor::data::Type::I32
+            || datatype == minicbor::data::Type::I64
+        {
+            // Signed integer value
+            let i = dec.i64()?;
+            CborValue::Integer(i)
         } else if datatype == minicbor::data::Type::Bytes {
             // Byte string
             let b = dec.bytes()?;
@@ -1518,6 +1542,14 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
         {
             // Unsigned integer value
             let i = dec.u64()? as i64;
+            CborValue::Integer(i)
+        } else if datatype == minicbor::data::Type::I8
+            || datatype == minicbor::data::Type::I16
+            || datatype == minicbor::data::Type::I32
+            || datatype == minicbor::data::Type::I64
+        {
+            // Signed integer value
+            let i = dec.i64()?;
             CborValue::Integer(i)
         } else if datatype == minicbor::data::Type::Bytes {
             // Byte string

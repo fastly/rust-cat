@@ -1,7 +1,7 @@
 //! Tests for Common Access Token
 
 use crate::{
-    cat_keys, catm, catr, catreplay, catu, cattprint,
+    cat_keys, catm, catr, catreplay, cattprint, catu,
     claims::RegisteredClaims,
     constants::{uri_components, FingerprintType},
     header::{Algorithm, CborValue, KeyId},
@@ -635,7 +635,7 @@ fn test_created_token_format() {
 }
 
 #[test]
-fn test_create_verify_token_with_catu_filename(){
+fn test_create_verify_token_with_catu_filename() {
     let key = b"testSecret";
     let expiration = current_timestamp() + 3600;
     // Create a token with CATU filename restriction
@@ -649,14 +649,14 @@ fn test_create_verify_token_with_catu_filename(){
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::FILENAME,
-                catu::suffix_match("video_3.mp4"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::FILENAME, catu::suffix_match("video_3.mp4"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -674,11 +674,13 @@ fn test_create_verify_token_with_catu_filename(){
         .verify_catu(true)
         .uri("https://example.com/us-east/title-1234/video_3.mp4");
 
-    token.verify_claims(&options).expect("Failed to verify token claims");
+    token
+        .verify_claims(&options)
+        .expect("Failed to verify token claims");
 }
 
 #[test]
-fn test_create_verify_token_with_catu_parentpath(){
+fn test_create_verify_token_with_catu_parentpath() {
     let key = b"testSecret";
     let expiration = current_timestamp() + 3600;
     // Create a token with CATU filename restriction
@@ -692,14 +694,17 @@ fn test_create_verify_token_with_catu_parentpath(){
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::PARENT_PATH,
-                catu::suffix_match("/us-east/title-1234"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(
+                    uri_components::PARENT_PATH,
+                    catu::suffix_match("/us-east/title-1234"),
+                );
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -717,11 +722,13 @@ fn test_create_verify_token_with_catu_parentpath(){
         .verify_catu(true)
         .uri("https://example.com/us-east/title-1234/video_3.mp4");
 
-    token.verify_claims(&options).expect("Failed to verify token claims");
+    token
+        .verify_claims(&options)
+        .expect("Failed to verify token claims");
 }
 
 #[test]
-fn test_create_verify_token_with_catu_stem(){
+fn test_create_verify_token_with_catu_stem() {
     let key = b"testSecret";
     let expiration = current_timestamp() + 3600;
     // Create a token with CATU filename restriction
@@ -735,14 +742,14 @@ fn test_create_verify_token_with_catu_stem(){
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::STEM,
-                catu::suffix_match("video_3"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::STEM, catu::suffix_match("video_3"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -760,7 +767,9 @@ fn test_create_verify_token_with_catu_stem(){
         .verify_catu(true)
         .uri("https://example.com/us-east/title-1234/video_3.mp4");
 
-    token.verify_claims(&options).expect("Failed to verify token claims");
+    token
+        .verify_claims(&options)
+        .expect("Failed to verify token claims");
 }
 
 #[test]
@@ -777,14 +786,14 @@ fn test_catu_filename_mismatch() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::FILENAME,
-                catu::suffix_match("video_3.mp4"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::FILENAME, catu::suffix_match("video_3.mp4"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -795,7 +804,10 @@ fn test_catu_filename_mismatch() {
         .verify_catu(true)
         .uri("https://example.com/us-east/title-1234/video_5.mp4");
 
-    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched filename");
+    assert!(
+        token.verify_claims(&options).is_err(),
+        "Should fail with mismatched filename"
+    );
 }
 
 #[test]
@@ -812,14 +824,17 @@ fn test_catu_parentpath_mismatch() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::PARENT_PATH,
-                catu::suffix_match("/us-east/title-1234"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(
+                    uri_components::PARENT_PATH,
+                    catu::suffix_match("/us-east/title-1234"),
+                );
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -830,7 +845,10 @@ fn test_catu_parentpath_mismatch() {
         .verify_catu(true)
         .uri("https://example.com/us-west/title-5678/video_3.mp4");
 
-    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched parent path");
+    assert!(
+        token.verify_claims(&options).is_err(),
+        "Should fail with mismatched parent path"
+    );
 }
 
 #[test]
@@ -847,14 +865,14 @@ fn test_catu_stem_mismatch() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::STEM,
-                catu::suffix_match("video_3"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::STEM, catu::suffix_match("video_3"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -865,7 +883,10 @@ fn test_catu_stem_mismatch() {
         .verify_catu(true)
         .uri("https://example.com/us-east/title-1234/audio_1.mp4");
 
-    assert!(token.verify_claims(&options).is_err(), "Should fail with mismatched stem");
+    assert!(
+        token.verify_claims(&options).is_err(),
+        "Should fail with mismatched stem"
+    );
 }
 
 #[test]
@@ -883,14 +904,14 @@ fn test_catu_filename_edge_cases() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::FILENAME,
-                catu::suffix_match("README"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::FILENAME, catu::suffix_match("README"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -900,7 +921,9 @@ fn test_catu_filename_edge_cases() {
         .verify_catu(true)
         .uri("https://example.com/docs/README");
 
-    token.verify_claims(&options).expect("Should handle filename without extension");
+    token
+        .verify_claims(&options)
+        .expect("Should handle filename without extension");
 }
 
 #[test]
@@ -918,14 +941,14 @@ fn test_catu_stem_edge_cases() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::STEM,
-                catu::suffix_match("Makefile"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::STEM, catu::suffix_match("Makefile"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -935,7 +958,9 @@ fn test_catu_stem_edge_cases() {
         .verify_catu(true)
         .uri("https://example.com/project/Makefile");
 
-    token.verify_claims(&options).expect("Should handle stem without extension");
+    token
+        .verify_claims(&options)
+        .expect("Should handle stem without extension");
 }
 
 #[test]
@@ -953,14 +978,14 @@ fn test_catu_parentpath_root() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::PARENT_PATH,
-                catu::suffix_match(""),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::PARENT_PATH, catu::suffix_match(""));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -970,7 +995,9 @@ fn test_catu_parentpath_root() {
         .verify_catu(true)
         .uri("https://example.com/file.txt");
 
-    token.verify_claims(&options).expect("Should handle root-level files with empty parent path");
+    token
+        .verify_claims(&options)
+        .expect("Should handle root-level files with empty parent path");
 }
 
 #[test]
@@ -988,14 +1015,17 @@ fn test_catu_filename_with_multiple_dots() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::FILENAME,
-                catu::suffix_match("archive.tar.gz"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(
+                    uri_components::FILENAME,
+                    catu::suffix_match("archive.tar.gz"),
+                );
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -1005,7 +1035,9 @@ fn test_catu_filename_with_multiple_dots() {
         .verify_catu(true)
         .uri("https://example.com/downloads/archive.tar.gz");
 
-    token.verify_claims(&options).expect("Should handle filenames with multiple dots");
+    token
+        .verify_claims(&options)
+        .expect("Should handle filenames with multiple dots");
 }
 
 #[test]
@@ -1023,14 +1055,14 @@ fn test_catu_stem_with_multiple_dots() {
                 .with_subject("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b")
                 .with_expiration(expiration),
         )
-        .custom_cbor(312, catu::create({
-            let mut components = BTreeMap::new();
-            components.insert(
-                uri_components::STEM,
-                catu::suffix_match("archive.tar"),
-            );
-            components
-        }))
+        .custom_cbor(
+            312,
+            catu::create({
+                let mut components = BTreeMap::new();
+                components.insert(uri_components::STEM, catu::suffix_match("archive.tar"));
+                components
+            }),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
@@ -1040,7 +1072,9 @@ fn test_catu_stem_with_multiple_dots() {
         .verify_catu(true)
         .uri("https://example.com/downloads/archive.tar.gz");
 
-    token.verify_claims(&options).expect("Should handle stem from filenames with multiple dots");
+    token
+        .verify_claims(&options)
+        .expect("Should handle stem from filenames with multiple dots");
 }
 
 #[test]
@@ -1057,23 +1091,30 @@ fn test_cattprint_token() {
                 .with_issuer("issuer")
                 .with_expiration(current_timestamp() + 3600),
         )
-        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .custom_cbor(
+            cat_keys::CATTPRINT,
+            cattprint::create(test_fingerprint_type, test_fingerprint_value),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
     // Extract and verify the CATTPRINT claim
     if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
-        use crate::constants::{tprint_params};
+        use crate::constants::tprint_params;
 
         // Check fingerprint type
-        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+        if let Some(CborValue::Integer(fingerprint_type)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_TYPE)
+        {
             assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
         } else {
             panic!("Missing or invalid fingerprint type");
         }
 
         // Check fingerprint value
-        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+        if let Some(CborValue::Text(fingerprint_value)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_VALUE)
+        {
             assert_eq!(*fingerprint_value, test_fingerprint_value);
         } else {
             panic!("Missing or invalid fingerprint value");
@@ -1105,23 +1146,30 @@ fn test_cattprint_token_fingerprint_type_not_match() {
                 .with_issuer("issuer")
                 .with_expiration(current_timestamp() + 3600),
         )
-        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .custom_cbor(
+            cat_keys::CATTPRINT,
+            cattprint::create(test_fingerprint_type, test_fingerprint_value),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
     // Extract and verify the CATTPRINT claim
     if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
-        use crate::constants::{tprint_params};
+        use crate::constants::tprint_params;
 
         // Check fingerprint type
-        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+        if let Some(CborValue::Integer(fingerprint_type)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_TYPE)
+        {
             assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
         } else {
             panic!("Missing or invalid fingerprint type");
         }
 
         // Check fingerprint value
-        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+        if let Some(CborValue::Text(fingerprint_value)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_VALUE)
+        {
             assert_eq!(*fingerprint_value, test_fingerprint_value);
         } else {
             panic!("Missing or invalid fingerprint value");
@@ -1137,12 +1185,14 @@ fn test_cattprint_token_fingerprint_type_not_match() {
         .fingerprint_value(test_fingerprint_value);
 
     let result = token.verify_claims(&options);
-    assert!(result.is_err(), "Expected error due to fingerprint type mismatch");
+    assert!(
+        result.is_err(),
+        "Expected error due to fingerprint type mismatch"
+    );
     match result {
         Err(crate::Error::InvalidTLSFingerprintClaim(msg)) => {
             assert_eq!(
-                msg,
-                "TLS Fingerprint Type 'JA4' does not match required value 'JA3'",
+                msg, "TLS Fingerprint Type 'JA4' does not match required value 'JA3'",
                 "Error message does not match expected value"
             );
         } // Expected
@@ -1164,23 +1214,30 @@ fn test_cattprint_token_fingerprint_value_not_match() {
                 .with_issuer("issuer")
                 .with_expiration(current_timestamp() + 3600),
         )
-        .custom_cbor(cat_keys::CATTPRINT, cattprint::create(test_fingerprint_type, test_fingerprint_value))
+        .custom_cbor(
+            cat_keys::CATTPRINT,
+            cattprint::create(test_fingerprint_type, test_fingerprint_value),
+        )
         .sign(key)
         .expect("Failed to sign token");
 
     // Extract and verify the CATTPRINT claim
     if let Some(CborValue::Map(cattprint_map)) = token.claims.custom.get(&cat_keys::CATTPRINT) {
-        use crate::constants::{tprint_params};
+        use crate::constants::tprint_params;
 
         // Check fingerprint type
-        if let Some(CborValue::Integer(fingerprint_type)) = cattprint_map.get(&tprint_params::FINGERPRINT_TYPE) {
+        if let Some(CborValue::Integer(fingerprint_type)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_TYPE)
+        {
             assert_eq!(*fingerprint_type, test_fingerprint_type as i64);
         } else {
             panic!("Missing or invalid fingerprint type");
         }
 
         // Check fingerprint value
-        if let Some(CborValue::Text(fingerprint_value)) = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE) {
+        if let Some(CborValue::Text(fingerprint_value)) =
+            cattprint_map.get(&tprint_params::FINGERPRINT_VALUE)
+        {
             assert_eq!(*fingerprint_value, test_fingerprint_value);
         } else {
             panic!("Missing or invalid fingerprint value");
@@ -1197,7 +1254,10 @@ fn test_cattprint_token_fingerprint_value_not_match() {
         .fingerprint_value(test_fingerprint_value_not_match);
 
     let result = token.verify_claims(&options);
-    assert!(result.is_err(), "Expected error due to fingerprint type mismatch");
+    assert!(
+        result.is_err(),
+        "Expected error due to fingerprint type mismatch"
+    );
     match result {
         Err(crate::Error::InvalidTLSFingerprintClaim(msg)) => {
             assert_eq!(
@@ -1207,5 +1267,118 @@ fn test_cattprint_token_fingerprint_value_not_match() {
             );
         } // Expected
         _ => panic!("Expected InvalidTLSFingerprintClaim error"),
+    }
+}
+
+#[test]
+fn test_signed_integer_cbor_types() {
+    let key = b"test-key-for-hmac-sha256-algorithm";
+
+    // Create a token with negative integer custom claims
+    // These will be encoded as I8, I16, I32, I64 CBOR types depending on the value
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_expiration(current_timestamp() + 3600),
+        )
+        // I8 range: -256 to -25 (e.g., -100)
+        .custom_int(200, -100)
+        // I16 range: -65536 to -257 (e.g., -1000)
+        .custom_int(201, -1000)
+        // I32 range: larger negative values (e.g., -100000)
+        .custom_int(202, -100000)
+        // I64 range: very large negative values
+        .custom_int(203, -10000000000i64)
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Encode to bytes
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Decode from bytes - this should succeed now that we handle I8, I16, I32, I64
+    let decoded_token =
+        Token::from_bytes(&token_bytes).expect("Failed to decode token with signed integers");
+
+    // Verify signature
+    decoded_token
+        .verify(key)
+        .expect("Failed to verify signature");
+
+    // Check that negative integer claims were preserved correctly
+    if let Some(CborValue::Integer(val)) = decoded_token.claims.custom.get(&200) {
+        assert_eq!(*val, -100, "I8 value should be preserved");
+    } else {
+        panic!("Custom claim 200 not found or has wrong type");
+    }
+
+    if let Some(CborValue::Integer(val)) = decoded_token.claims.custom.get(&201) {
+        assert_eq!(*val, -1000, "I16 value should be preserved");
+    } else {
+        panic!("Custom claim 201 not found or has wrong type");
+    }
+
+    if let Some(CborValue::Integer(val)) = decoded_token.claims.custom.get(&202) {
+        assert_eq!(*val, -100000, "I32 value should be preserved");
+    } else {
+        panic!("Custom claim 202 not found or has wrong type");
+    }
+
+    if let Some(CborValue::Integer(val)) = decoded_token.claims.custom.get(&203) {
+        assert_eq!(*val, -10000000000i64, "I64 value should be preserved");
+    } else {
+        panic!("Custom claim 203 not found or has wrong type");
+    }
+}
+
+#[test]
+fn test_signed_integer_in_nested_structures() {
+    let key = b"test-key-for-hmac-sha256-algorithm";
+
+    // Create a nested map with negative integers
+    let mut nested_map = BTreeMap::new();
+    nested_map.insert(1, CborValue::Integer(-50)); // Small negative
+    nested_map.insert(2, CborValue::Integer(-500)); // I8/I16 range
+    nested_map.insert(3, CborValue::Integer(-50000)); // I16/I32 range
+
+    // Create a token with nested map containing negative integers
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_expiration(current_timestamp() + 3600),
+        )
+        .custom_map(300, nested_map)
+        .sign(key)
+        .expect("Failed to sign token");
+
+    // Encode and decode
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded_token = Token::from_bytes(&token_bytes)
+        .expect("Failed to decode token with nested signed integers");
+
+    // Verify the nested map values
+    if let Some(CborValue::Map(map)) = decoded_token.claims.custom.get(&300) {
+        if let Some(CborValue::Integer(val)) = map.get(&1) {
+            assert_eq!(*val, -50);
+        } else {
+            panic!("Expected integer at key 1");
+        }
+
+        if let Some(CborValue::Integer(val)) = map.get(&2) {
+            assert_eq!(*val, -500);
+        } else {
+            panic!("Expected integer at key 2");
+        }
+
+        if let Some(CborValue::Integer(val)) = map.get(&3) {
+            assert_eq!(*val, -50000);
+        } else {
+            panic!("Expected integer at key 3");
+        }
+    } else {
+        panic!("Custom claim 300 not found or has wrong type");
     }
 }

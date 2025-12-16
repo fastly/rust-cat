@@ -163,8 +163,14 @@ pub mod cattprint {
 
     pub fn create(fingerprint_type: FingerprintType, fingerprint_value: &str) -> CborValue {
         let mut params = BTreeMap::new();
-        params.insert(tprint_params::FINGERPRINT_TYPE, CborValue::Integer(fingerprint_type as i64));
-        params.insert(tprint_params::FINGERPRINT_VALUE, CborValue::Text(fingerprint_value.to_string()));
+        params.insert(
+            tprint_params::FINGERPRINT_TYPE,
+            CborValue::Integer(fingerprint_type as i64),
+        );
+        params.insert(
+            tprint_params::FINGERPRINT_VALUE,
+            CborValue::Text(fingerprint_value.to_string()),
+        );
         CborValue::Map(params)
     }
 }
