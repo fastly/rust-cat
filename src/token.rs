@@ -635,10 +635,10 @@ impl Token {
         }
 
         // Check if the provided Fingerprint Value matches
-        let fingerprint_value_upper = fingerprint_value.to_lowercase();
+        let fingerprint_value_lower = fingerprint_value.to_lowercase();
         let claim_fingerprint_value = cattprint_map.get(&tprint_params::FINGERPRINT_VALUE);
         if let Some(CborValue::Text(claim_value)) = claim_fingerprint_value {
-            if claim_value.to_lowercase() != fingerprint_value_upper {
+            if claim_value.to_lowercase() != fingerprint_value_lower {
                 return Err(Error::InvalidTLSFingerprintClaim(format!(
                     "TLS Fingerprint Value '{}' does not match required value '{}'",
                     claim_value, fingerprint_value
