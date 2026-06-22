@@ -4,7 +4,7 @@ use crate::{
     cat_keys, catm, catr, catreplay, cattprint, catu,
     claims::RegisteredClaims,
     constants::{uri_components, FingerprintType},
-    header::{Algorithm, AlgorithmClass, CborValue, KeyId},
+    header::{Algorithm, AlgorithmClass, CborValue, KeyId, VerifyingKey},
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
 };
@@ -44,7 +44,7 @@ fn test_token_creation_and_verification() {
 
     // Verify signature
     decoded_token
-        .verify(key)
+        .verify_with_key(VerifyingKey::HmacSha256(key))
         .expect("Failed to verify signature");
 
     // Verify claims
@@ -181,7 +181,7 @@ fn test_invalid_signature() {
         .expect("Failed to sign token");
 
     // Verify with wrong key should fail
-    let result = token.verify(wrong_key);
+    let result = token.verify_with_key(VerifyingKey::HmacSha256(wrong_key));
     assert!(result.is_err());
     match result {
         Err(crate::Error::SignatureVerification) => {} // Expected
@@ -263,7 +263,9 @@ fn test_specific_token_verification() {
     let token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
     // Verify the signature
-    token.verify(&key).expect("Failed to verify signature");
+    token
+        .verify_with_key(VerifyingKey::HmacSha256(&key))
+        .expect("Failed to verify signature");
 
     // Check registered claims
     assert_eq!(token.claims.registered.iss, Some("cdnname".to_string()));
@@ -562,14 +564,16 @@ fn test_mac0_token_verification_with_original_bytes() {
     // Verify the token with the correct key
     let key = b"testSecret";
     assert!(
-        token.verify(key).is_ok(),
+        token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
         "Token verification should succeed with testSecret"
     );
 
     // Verify the token fails with wrong key
     let wrong_key = b"wrongKey";
     assert!(
-        token.verify(wrong_key).is_err(),
+        token
+            .verify_with_key(VerifyingKey::HmacSha256(wrong_key))
+            .is_err(),
         "Token verification should fail with wrong key"
     );
 
@@ -883,7 +887,9 @@ fn test_created_token_format() {
 
     // Verify the token can be decoded and verified
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
-    decoded.verify(key).expect("Failed to verify token");
+    decoded
+        .verify_with_key(VerifyingKey::HmacSha256(key))
+        .expect("Failed to verify token");
 }
 
 #[test]
@@ -917,7 +923,9 @@ fn test_create_verify_token_with_catu_filename() {
 
     // Verify the token can be decoded and verified
     let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
-    decoded_token.verify(key).expect("Failed to verify token");
+    decoded_token
+        .verify_with_key(VerifyingKey::HmacSha256(key))
+        .expect("Failed to verify token");
 
     // Verify including checking catu with a valid URI
     let options = VerificationOptions::new()
@@ -965,7 +973,9 @@ fn test_create_verify_token_with_catu_parentpath() {
 
     // Verify the token can be decoded and verified
     let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
-    decoded_token.verify(key).expect("Failed to verify token");
+    decoded_token
+        .verify_with_key(VerifyingKey::HmacSha256(key))
+        .expect("Failed to verify token");
 
     // Verify including checking catu with a valid URI
     let options = VerificationOptions::new()
@@ -1010,7 +1020,9 @@ fn test_create_verify_token_with_catu_stem() {
 
     // Verify the token can be decoded and verified
     let decoded_token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
-    decoded_token.verify(key).expect("Failed to verify token");
+    decoded_token
+        .verify_with_key(VerifyingKey::HmacSha256(key))
+        .expect("Failed to verify token");
 
     // Verify including checking catu with a valid URI
     let options = VerificationOptions::new()
@@ -1555,7 +1567,7 @@ fn test_signed_integer_cbor_types() {
 
     // Verify signature
     decoded_token
-        .verify(key)
+        .verify_with_key(VerifyingKey::HmacSha256(key))
         .expect("Failed to verify signature");
 
     // Check that negative integer claims were preserved correctly
@@ -1721,7 +1733,7 @@ fn test_es256_sign_and_verify() {
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
     decoded
-        .verify(&public_key)
+        .verify_with_key(VerifyingKey::Es256(&public_key))
         .expect("Failed to verify ES256 signature");
 
     let options = VerificationOptions::new()
@@ -1754,7 +1766,7 @@ fn test_ps256_sign_and_verify() {
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
     decoded
-        .verify(&public_key)
+        .verify_with_key(VerifyingKey::Ps256(&public_key))
         .expect("Failed to verify PS256 signature");
 
     let options = VerificationOptions::new()
@@ -1821,15 +1833,28 @@ fn test_es256_wrong_key_fails() {
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
     assert!(
-        decoded.verify(&wrong_public_key).is_err(),
+        decoded
+            .verify_with_key(VerifyingKey::Es256(&wrong_public_key))
+            .is_err(),
         "Verification should fail with a non-matching public key"
     );
 
     // Verifying against an unrelated but valid PS256 public key must also fail.
+    // Presenting it as an ES256 key (matching the token's declared algorithm)
+    // fails the cryptographic check; presenting it as a PS256 key fails the
+    // algorithm-binding check. Both must be rejected.
     let (_ps_priv, ps_pub) = ps256_keys();
     assert!(
-        decoded.verify(&ps_pub).is_err(),
+        decoded
+            .verify_with_key(VerifyingKey::Es256(&ps_pub))
+            .is_err(),
         "ES256 token should not verify against an RSA public key"
+    );
+    assert!(
+        decoded
+            .verify_with_key(VerifyingKey::Ps256(&ps_pub))
+            .is_err(),
+        "ES256 token must be rejected when the key is for a different algorithm"
     );
 }
 
@@ -1840,11 +1865,21 @@ fn test_ps256_wrong_key_fails() {
     let token_bytes = token.to_bytes().expect("Failed to encode token");
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
-    // Verify against the ES256 (non-matching) public key.
+    // Verify against the ES256 (non-matching) public key. Presented as a PS256
+    // key it fails the cryptographic check; presented as an ES256 key it fails
+    // the algorithm-binding check. Both must be rejected.
     let (_es_priv, es_pub) = es256_keys();
     assert!(
-        decoded.verify(&es_pub).is_err(),
+        decoded
+            .verify_with_key(VerifyingKey::Ps256(&es_pub))
+            .is_err(),
         "PS256 token should not verify against an EC public key"
+    );
+    assert!(
+        decoded
+            .verify_with_key(VerifyingKey::Es256(&es_pub))
+            .is_err(),
+        "PS256 token must be rejected when the key is for a different algorithm"
     );
 }
 
@@ -1873,7 +1908,9 @@ fn test_es256_tampered_payload_fails() {
         Token::from_bytes(&token_bytes).expect("tampered token should still decode structurally");
     // ...but signature verification must reject the tampered payload.
     assert!(
-        decoded.verify(&public_key).is_err(),
+        decoded
+            .verify_with_key(VerifyingKey::Es256(&public_key))
+            .is_err(),
         "Verification should fail for a tampered ES256 token"
     );
 }
@@ -1962,8 +1999,12 @@ fn test_ps256_signatures_are_randomized() {
     assert_eq!(&bytes_a[split..], token_a.signature.as_slice());
     assert_eq!(&bytes_b[split..], token_b.signature.as_slice());
 
-    token_a.verify(&public_key).expect("token_a should verify");
-    token_b.verify(&public_key).expect("token_b should verify");
+    token_a
+        .verify_with_key(VerifyingKey::Ps256(&public_key))
+        .expect("token_a should verify");
+    token_b
+        .verify_with_key(VerifyingKey::Ps256(&public_key))
+        .expect("token_b should verify");
 }
 
 #[test]
@@ -2034,7 +2075,7 @@ fn test_ps256_invalid_private_key_errors() {
 fn test_es256_invalid_public_key_errors() {
     let (private_key, _public_key) = es256_keys();
     let token = build_signed_token(Algorithm::Es256, &private_key);
-    let result = token.verify(b"not-a-valid-der-key");
+    let result = token.verify_with_key(VerifyingKey::Es256(b"not-a-valid-der-key"));
     assert!(
         matches!(result, Err(crate::error::Error::InvalidKey(_))),
         "Verifying with an invalid ES256 public key should yield InvalidKey"
@@ -2213,4 +2254,70 @@ fn test_to_bytes_without_algorithm_errors() {
         matches!(token.to_bytes(), Err(crate::error::Error::InvalidFormat(_))),
         "to_bytes() on a token with no algorithm should return InvalidFormat"
     );
+}
+
+/// The algorithm-confusion forgery this fix prevents: an attacker forges a token
+/// with `alg = HmacSha256` and a MAC computed over the *public* ES256 key (which
+/// is not secret). A verifier holding only that public key must reject it.
+#[test]
+fn test_alg_confusion_hmac_over_public_key_is_rejected() {
+    let (_es_priv, es_pub) = es256_keys();
+
+    // Attacker mints an HMAC token using the victim's public key bytes as the
+    // "secret" — something they can do because the public key is public.
+    let forged = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .protected_key_id(KeyId::string("asym-key-1"))
+        .registered_claims(RegisteredClaims::new().with_issuer("attacker"))
+        .sign(&es_pub)
+        .expect("forged token signs");
+
+    let token_bytes = forged.to_bytes().expect("encode");
+    let decoded = Token::from_bytes(&token_bytes).expect("decode");
+
+    // The victim verifies with its ES256 public key. The algorithm binding on
+    // VerifyingKey means the HmacSha256 header no longer steers verification to
+    // HMAC, so the forgery is rejected before any crypto runs.
+    let result = decoded.verify_with_key(VerifyingKey::Es256(&es_pub));
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidAlgorithm(_))),
+        "alg-confusion forgery must be rejected with InvalidAlgorithm, got {result:?}"
+    );
+}
+
+/// The deprecated `verify` refuses asymmetric algorithms outright, so it can no
+/// longer be used to mount the confusion attack.
+#[test]
+#[allow(deprecated)]
+fn test_deprecated_verify_rejects_asymmetric() {
+    let (private_key, public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let token_bytes = token.to_bytes().expect("encode");
+    let decoded = Token::from_bytes(&token_bytes).expect("decode");
+
+    let result = decoded.verify(&public_key);
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidAlgorithm(_))),
+        "deprecated verify must reject ES256, got {result:?}"
+    );
+}
+
+/// The deprecated `verify` still works for HMAC tokens (backward compatibility).
+#[test]
+#[allow(deprecated)]
+fn test_deprecated_verify_still_works_for_hmac() {
+    let key = b"my-secret-hmac-key";
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(key)
+        .expect("sign");
+    let token_bytes = token.to_bytes().expect("encode");
+    let decoded = Token::from_bytes(&token_bytes).expect("decode");
+
+    decoded.verify(key).expect("HMAC verify should still succeed");
+    // And verify_with_key works the same way.
+    decoded
+        .verify_with_key(VerifyingKey::HmacSha256(key))
+        .expect("HMAC verify_with_key should succeed");
 }

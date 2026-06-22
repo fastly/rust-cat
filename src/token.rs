@@ -3,7 +3,7 @@
 use crate::claims::{Claims, ClaimsMap, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
-use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
+use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId, VerifyingKey};
 use crate::utils::{
     compute_es256, compute_hmac_sha256, compute_ps256, current_timestamp, verify_es256,
     verify_hmac_sha256, verify_ps256,
@@ -174,23 +174,67 @@ impl Token {
         })
     }
 
-    /// Verify the token signature
+    /// Verify the token signature using a raw key, dispatching on the token's
+    /// own `alg` header.
     ///
-    /// The structure used depends on the algorithm in the protected header:
+    /// # Deprecated
     ///
-    /// - **HmacSha256** uses the COSE_Mac0 structure. For backward compatibility
-    ///   with tokens produced by other implementations, both the COSE_Sign1 and
-    ///   COSE_Mac0 inputs are tried.
-    /// - **Es256** and **Ps256** are asymmetric signature algorithms and use the
-    ///   COSE_Sign1 structure. For these, `key` must be the SPKI DER-encoded
-    ///   public key.
+    /// This method picks the verification algorithm from the *token's*
+    /// self-declared `alg` header and applies it to the caller-supplied bytes.
+    /// For asymmetric algorithms that is unsafe: an attacker can craft a token
+    /// with `alg = HmacSha256` and a MAC computed over your (public) ES256/PS256
+    /// verification key, and this method would accept it — an algorithm-confusion
+    /// forgery. To avoid that, this method now only accepts MAC (HMAC-SHA256)
+    /// tokens and returns [`Error::InvalidAlgorithm`] for ES256/PS256.
+    ///
+    /// Use [`Token::verify_with_key`] with a typed [`VerifyingKey`] instead; it
+    /// binds the algorithm to the key and supports all algorithms safely.
+    #[deprecated(
+        since = "0.3.0",
+        note = "use `verify_with_key` with a typed `VerifyingKey`; `verify` no longer supports ES256/PS256 to prevent algorithm-confusion forgery"
+    )]
     pub fn verify(&self, key: &[u8]) -> Result<(), Error> {
         let alg = self.header.algorithm().ok_or_else(|| {
             Error::InvalidFormat("Missing algorithm in protected header".to_string())
         })?;
 
         match alg {
-            Algorithm::HmacSha256 => {
+            Algorithm::HmacSha256 => self.verify_with_key(VerifyingKey::HmacSha256(key)),
+            Algorithm::Es256 | Algorithm::Ps256 => Err(Error::InvalidAlgorithm(format!(
+                "`verify` only supports HMAC-SHA256; use `verify_with_key` for {alg:?}"
+            ))),
+        }
+    }
+
+    /// Verify the token signature with a typed verification key.
+    ///
+    /// The token's header `alg` must match the key's algorithm
+    /// ([`VerifyingKey::algorithm`]); otherwise this returns
+    /// [`Error::InvalidAlgorithm`] *before* any cryptography runs. Binding the
+    /// algorithm to the key (rather than trusting the token's self-declared
+    /// `alg`) is what prevents algorithm-confusion forgery.
+    ///
+    /// The COSE structure used depends on the algorithm:
+    ///
+    /// - **HmacSha256** uses the COSE_Mac0 structure. For backward compatibility
+    ///   with tokens produced by other implementations, both the COSE_Sign1 and
+    ///   COSE_Mac0 inputs are tried.
+    /// - **Es256** and **Ps256** are asymmetric signature algorithms and use the
+    ///   COSE_Sign1 structure. The key must be the SPKI DER-encoded public key.
+    pub fn verify_with_key(&self, key: VerifyingKey) -> Result<(), Error> {
+        let alg = self.header.algorithm().ok_or_else(|| {
+            Error::InvalidFormat("Missing algorithm in protected header".to_string())
+        })?;
+
+        if alg != key.algorithm() {
+            return Err(Error::InvalidAlgorithm(format!(
+                "token declares {alg:?} but verification key is for {:?}",
+                key.algorithm()
+            )));
+        }
+
+        match key {
+            VerifyingKey::HmacSha256(key) => {
                 // Try with COSE_Sign1 structure first
                 let sign1_input = self.sign1_input()?;
                 let sign1_result = verify_hmac_sha256(key, &sign1_input, &self.signature);
@@ -204,15 +248,13 @@ impl Token {
                 verify_hmac_sha256(key, &mac0_input, &self.signature)
             }
             // Es256 and Ps256 share the same COSE_Sign1 input but are kept as
-            // separate arms (rather than merged into `Es256 | Ps256` with a
-            // nested match) so each maps directly to its own verify primitive.
-            // The duplication is one line; a merged arm would re-introduce a
-            // nested `match alg` that is harder to read for no real savings.
-            Algorithm::Es256 => {
+            // separate arms (rather than merged) so each maps directly to its
+            // own verify primitive; the duplication is one line.
+            VerifyingKey::Es256(key) => {
                 let sign1_input = self.sign1_input()?;
                 verify_es256(key, &sign1_input, &self.signature)
             }
-            Algorithm::Ps256 => {
+            VerifyingKey::Ps256(key) => {
                 let sign1_input = self.sign1_input()?;
                 verify_ps256(key, &sign1_input, &self.signature)
             }

@@ -1,6 +1,6 @@
 use common_access_token::{
     current_timestamp, Algorithm, CborValue, KeyId, RegisteredClaims, TokenBuilder,
-    VerificationOptions,
+    VerificationOptions, VerifyingKey,
 };
 use std::collections::BTreeMap;
 
@@ -132,7 +132,7 @@ fn verify_token(token_bytes: &[u8], key: &[u8], expected_token_type: &str) {
     };
 
     // Verify the signature
-    if let Err(err) = token.verify(key) {
+    if let Err(err) = token.verify_with_key(VerifyingKey::HmacSha256(key)) {
         println!(
             "Failed to verify {} token signature: {}",
             expected_token_type, err
@@ -195,7 +195,7 @@ fn verify_nested_map_token(token_bytes: &[u8], key: &[u8]) {
     };
 
     // Verify the signature
-    if let Err(err) = token.verify(key) {
+    if let Err(err) = token.verify_with_key(VerifyingKey::HmacSha256(key)) {
         println!("Failed to verify nested map token signature: {}", err);
         return;
     }
