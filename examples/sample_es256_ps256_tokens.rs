@@ -9,6 +9,7 @@
 
 use common_access_token::{
     current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
+    VerifyingKey,
 };
 use ct_codecs::{Base64, Base64UrlSafeNoPadding, Decoder, Encoder, Hex};
 
@@ -93,7 +94,14 @@ fn mint(
 
     // Sanity check: the token verifies against its public key.
     let decoded = Token::from_bytes(&token_bytes).expect("decode");
-    decoded.verify(&public_key).expect("verify signature");
+    let verifying_key = match alg {
+        Algorithm::Es256 => VerifyingKey::Es256(&public_key),
+        Algorithm::Ps256 => VerifyingKey::Ps256(&public_key),
+        other => panic!("unsupported algorithm for this example: {other:?}"),
+    };
+    decoded
+        .verify_with_key(verifying_key)
+        .expect("verify signature");
     decoded
         .verify_claims(
             &VerificationOptions::new()

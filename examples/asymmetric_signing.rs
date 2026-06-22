@@ -24,6 +24,7 @@
 
 use common_access_token::{
     current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
+    VerifyingKey,
 };
 use ct_codecs::{Base64, Decoder};
 
@@ -89,10 +90,17 @@ fn demo(name: &str, alg: Algorithm, private_key_b64: &str, public_key_b64: &str,
         token.signature.len()
     );
 
-    // The verifier only needs the public key.
+    // The verifier only needs the public key. The key is wrapped in a typed
+    // `VerifyingKey` that names its algorithm, so the token's self-declared
+    // `alg` header cannot steer verification to a different primitive.
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+    let verifying_key = match alg {
+        Algorithm::Es256 => VerifyingKey::Es256(&public_key),
+        Algorithm::Ps256 => VerifyingKey::Ps256(&public_key),
+        other => panic!("unsupported algorithm for this example: {other:?}"),
+    };
     decoded
-        .verify(&public_key)
+        .verify_with_key(verifying_key)
         .expect("Failed to verify signature");
 
     let options = VerificationOptions::new()

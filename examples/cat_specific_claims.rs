@@ -1,6 +1,6 @@
 use common_access_token::{
     cat_keys, catm, catr, catreplay, catu, current_timestamp, uri_components, Algorithm, KeyId,
-    RegisteredClaims, TokenBuilder, VerificationOptions,
+    RegisteredClaims, TokenBuilder, VerificationOptions, VerifyingKey,
 };
 use std::collections::BTreeMap;
 
@@ -21,7 +21,7 @@ fn main() {
 
     // Verify the signature
     decoded_token
-        .verify(key)
+        .verify_with_key(VerifyingKey::HmacSha256(key))
         .expect("Failed to verify signature");
 
     // Verify the claims
