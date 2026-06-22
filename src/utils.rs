@@ -19,6 +19,75 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(
     }
 }
 
+/// Compute an ES256 (ECDSA P-256 + SHA-256) signature over `data`.
+///
+/// `key` must be a PKCS#8 DER-encoded P-256 private key. The returned signature
+/// is the fixed-length 64-byte COSE representation (`r || s`), as required by the
+/// COSE specification (RFC 8152 §8.1).
+pub fn compute_es256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
+    use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+    use p256::pkcs8::DecodePrivateKey;
+
+    let signing_key = SigningKey::from_pkcs8_der(key)
+        .map_err(|e| Error::InvalidKey(format!("Invalid ES256 private key: {e}")))?;
+    // ECDSA signing with the RustCrypto `ecdsa` crate is deterministic (RFC 6979),
+    // so no RNG is required here.
+    let signature: Signature = signing_key.sign(data);
+    Ok(signature.to_bytes().to_vec())
+}
+
+/// Verify an ES256 (ECDSA P-256 + SHA-256) signature over `data`.
+///
+/// `key` must be an SPKI DER-encoded P-256 public key. `signature` must be the
+/// fixed-length 64-byte COSE representation (`r || s`).
+pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Error> {
+    use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+    use p256::pkcs8::DecodePublicKey;
+
+    let verifying_key = VerifyingKey::from_public_key_der(key)
+        .map_err(|e| Error::InvalidKey(format!("Invalid ES256 public key: {e}")))?;
+    let signature = Signature::from_slice(signature).map_err(|_| Error::SignatureVerification)?;
+    verifying_key
+        .verify(data, &signature)
+        .map_err(|_| Error::SignatureVerification)
+}
+
+/// Compute a PS256 (RSASSA-PSS with SHA-256 and MGF1-SHA-256) signature over `data`.
+///
+/// `key` must be a PKCS#8 DER-encoded RSA private key. PSS uses a random salt, so
+/// an OS-provided RNG is used (WASM-friendly via `getrandom`).
+pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::pss::SigningKey;
+    use rsa::signature::{RandomizedSigner, SignatureEncoding};
+    use rsa::RsaPrivateKey;
+
+    let private_key = RsaPrivateKey::from_pkcs8_der(key)
+        .map_err(|e| Error::InvalidKey(format!("Invalid PS256 private key: {e}")))?;
+    let signing_key = SigningKey::<sha2::Sha256>::new(private_key);
+    let mut rng = rand_core::OsRng;
+    let signature = signing_key.sign_with_rng(&mut rng, data);
+    Ok(signature.to_vec())
+}
+
+/// Verify a PS256 (RSASSA-PSS with SHA-256 and MGF1-SHA-256) signature over `data`.
+///
+/// `key` must be an SPKI DER-encoded RSA public key.
+pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Error> {
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::pss::{Signature, VerifyingKey};
+    use rsa::signature::Verifier;
+    use rsa::RsaPublicKey;
+
+    let public_key = RsaPublicKey::from_public_key_der(key)
+        .map_err(|e| Error::InvalidKey(format!("Invalid PS256 public key: {e}")))?;
+    let verifying_key = VerifyingKey::<sha2::Sha256>::new(public_key);
+    let signature = Signature::try_from(signature).map_err(|_| Error::SignatureVerification)?;
+    verifying_key
+        .verify(data, &signature)
+        .map_err(|_| Error::SignatureVerification)
+}
+
 /// Get current timestamp in seconds since Unix epoch
 pub fn current_timestamp() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};

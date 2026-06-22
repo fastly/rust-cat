@@ -1382,3 +1382,296 @@ fn test_signed_integer_in_nested_structures() {
         panic!("Custom claim 300 not found or has wrong type");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Asymmetric algorithm tests (ES256 / PS256)
+//
+// The key material below is generated once with OpenSSL and embedded as
+// base64-encoded DER so the tests are deterministic and fast (RSA key
+// generation at test time would be slow).
+//
+//   ES256 (P-256):
+//     openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out es.pem
+//     openssl pkcs8 -topk8 -nocrypt -in es.pem -outform DER         # private (PKCS#8)
+//     openssl pkey -in es.pem -pubout -outform DER                  # public  (SPKI)
+//
+//   PS256 (RSA-2048):
+//     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -outform DER  # private (PKCS#8)
+//     openssl pkey -inform DER -in ps_priv.der -pubout -outform DER              # public  (SPKI)
+// ---------------------------------------------------------------------------
+
+/// ES256 PKCS#8 DER private key (base64-encoded).
+const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7BOlgwBOMKscTUCaG3RmlSCgUznDdxMn+9Pvoqp4pUOhRANCAARWMcvR3DnF1U15IvgcOyAxr3pJPfOHcF7ESuY+H+ya3LCH03PC1d99/XgN1ldF+wmMxVhY0w9iop10N6tNZDTg";
+/// ES256 SPKI DER public key (base64-encoded), matching the private key above.
+const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
+
+/// PS256 PKCS#8 DER private key (base64-encoded).
+const PS256_PRIVATE_KEY_B64: &str = "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCHjA5iauwvo2sRB529iV1c+p+WuGFzk5EUGFFLYoIHxAwo/rSmZ2/D00epwb4WzOxA4c8+1QA+0rZIN35Fti9Wiunt0b1DgC0tuSglNzpEE5gjhTDcAWZOBPOCMt9pKEuuQC4eqBRxPoG5Y14dVi46/aQOQSqU5I0T3cbeLliTzjXkrvdqySFXMGpM9/I469SZRxZbDgB8wUcB2nTIuwOokjN/Vp+BpMM5QmR66J6aFNi8LqCmQv3grUI1kM1fqrC3az/YcyXcDvjinagyXsGYgW2ZpXIf2760UXv/bASAOO01sgI8zxbIDdG6Vd+7iPhr4b/v6QIj6rpuURFfns2LAgMBAAECggEAH9CdXbdYCZRzYHNnsGGqEtVWmQNdCEo2Lr/IcQfFmnoHGqYyE67Kmm2gb/VkHyjpOQ9nXAmVvakqlMfFsSoicU84uhPVNx9CO22uwRF18R2iQ5ATGEiR0TUzTLeRHbcSEGvLB3IPHkd8Hl327K7aOglntNrR2lHM1UFkWKkLLGHObPoLBSTQLjX5JkvtpUuBgnPVlfBUc5al9+CH+m/SiC4BvVWo4hiHEKCQgMIQ/Dh8UtS9Vk91FIizqKpqBXE6+PNmAnn9ZwRjZoRNBSLn0paAyiEXXdr5rV8zeYU0ktY40J9qWEFOJmTYII4pUK1U8tukrQ0w4LUm17f8zMkufQKBgQC7MGcSrbFWVjlEwA760sG6NKOZb5sL+2etIVAJyfSoGrwr8H4aQA1WFP+pmmlCWsLZj8qfTYSyocwfT/p9aY9Na7ftyks+q1QSsDF+D7frgxmITJeCSwiPa7jnOTrmReqAEOyPn8IlytHIhJbaPxzDxPf572QIAIBgsWhdygn21QKBgQC5X9agS0u2Joypz36ZIilbgbtgmSvFAE/22U0il+3GgXQbjmxPCip1UZm1cBgmLhq12bxU1xYxJpGVPWhEsmkIrOkEfNf/RYlSvVLzbuZLQxeB1g5FDrFb1EbaegrFznv/rFonyXMeRyJ7PHtDttfN5jxNTxTiV3BQ4uobgsai3wKBgFEiW6q26mSXnt7zuApzi1CgPEDnJPb+kyNxivWTOZ4baHBLHv1VwfILy/zBVtpR6J7QOmzt9pROmOEBk3sEY/6Ur/Y7dn3FWP14rRsMyRUlj82KFSl+SEmR0WU3YxYoO8oii8Z84nPrAx68iX4zWM5p82m7n0nwnbRLcQcl6Ue5AoGACjVN42viEnjS/DLx/MrVzjU5tVsZ/vJCdQyIY+RL8seENlREgKHFrso8lbJDki6tx9/isCVcEn7WO4qzKD1O7WxgNKAPYP5aTpUgcUllIzXhoIPCK2lguPbapANefoAdcfnyyQgd78fpDTJKc3MpNSx9m6BEPSalh77HN5afC68CgYBSHR2vz1GuUzHSgU+3xKqGSc+jlroetJ1dC5913Z+9eawW7QrRfmSod+JfEiJSw8eS+5/rGYjKihMtNPyqzadRvZtp0QGZrrm1k1/vqqeeH5Uq6AgH/2Djql4tUvC3gmgpHjY7RyPDv6v+u+L9C6MP0Nu5vVfQwpAmX9bsjn/Tjw==";
+/// PS256 SPKI DER public key (base64-encoded), matching the private key above.
+const PS256_PUBLIC_KEY_B64: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAh4wOYmrsL6NrEQedvYldXPqflrhhc5ORFBhRS2KCB8QMKP60pmdvw9NHqcG+FszsQOHPPtUAPtK2SDd+RbYvVorp7dG9Q4AtLbkoJTc6RBOYI4Uw3AFmTgTzgjLfaShLrkAuHqgUcT6BuWNeHVYuOv2kDkEqlOSNE93G3i5Yk8415K73askhVzBqTPfyOOvUmUcWWw4AfMFHAdp0yLsDqJIzf1afgaTDOUJkeuiemhTYvC6gpkL94K1CNZDNX6qwt2s/2HMl3A744p2oMl7BmIFtmaVyH9u+tFF7/2wEgDjtNbICPM8WyA3RulXfu4j4a+G/7+kCI+q6blERX57NiwIDAQAB";
+
+fn es256_keys() -> (Vec<u8>, Vec<u8>) {
+    use ct_codecs::{Base64, Decoder};
+    (
+        Base64::decode_to_vec(ES256_PRIVATE_KEY_B64, None).expect("valid ES256 private key"),
+        Base64::decode_to_vec(ES256_PUBLIC_KEY_B64, None).expect("valid ES256 public key"),
+    )
+}
+
+fn ps256_keys() -> (Vec<u8>, Vec<u8>) {
+    use ct_codecs::{Base64, Decoder};
+    (
+        Base64::decode_to_vec(PS256_PRIVATE_KEY_B64, None).expect("valid PS256 private key"),
+        Base64::decode_to_vec(PS256_PUBLIC_KEY_B64, None).expect("valid PS256 public key"),
+    )
+}
+
+fn build_signed_token(alg: Algorithm, private_key: &[u8]) -> Token {
+    TokenBuilder::new()
+        .algorithm(alg)
+        .protected_key_id(KeyId::string("asym-key-1"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_subject("subject")
+                .with_audience("audience")
+                .with_expiration(current_timestamp() + 3600)
+                .with_not_before(current_timestamp())
+                .with_issued_at(current_timestamp()),
+        )
+        .custom_string(100, "custom-string-value")
+        .custom_int(102, 12345)
+        .sign(private_key)
+        .expect("Failed to sign token")
+}
+
+#[test]
+fn test_es256_sign_and_verify() {
+    let (private_key, public_key) = es256_keys();
+
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+
+    // ES256 signatures are the fixed 64-byte COSE form (r || s).
+    assert_eq!(
+        token.signature.len(),
+        64,
+        "ES256 signature should be 64 bytes"
+    );
+    assert_eq!(token.header.algorithm(), Some(Algorithm::Es256));
+
+    // Round-trip through encoding.
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    decoded
+        .verify(&public_key)
+        .expect("Failed to verify ES256 signature");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .verify_nbf(true)
+        .expected_issuer("issuer")
+        .expected_audience("audience");
+    decoded
+        .verify_claims(&options)
+        .expect("Failed to verify claims");
+
+    assert_eq!(decoded.get_custom_string(100), Some("custom-string-value"));
+    assert_eq!(decoded.get_custom_int(102), Some(12345));
+}
+
+#[test]
+fn test_ps256_sign_and_verify() {
+    let (private_key, public_key) = ps256_keys();
+
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    assert_eq!(token.header.algorithm(), Some(Algorithm::Ps256));
+    // RSA-2048 PSS signature is 256 bytes.
+    assert_eq!(
+        token.signature.len(),
+        256,
+        "PS256 signature should be 256 bytes"
+    );
+
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    decoded
+        .verify(&public_key)
+        .expect("Failed to verify PS256 signature");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .verify_nbf(true)
+        .expected_issuer("issuer")
+        .expected_audience("audience");
+    decoded
+        .verify_claims(&options)
+        .expect("Failed to verify claims");
+}
+
+#[test]
+fn test_es256_uses_cose_sign1_tags() {
+    let (private_key, _public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Asymmetric algorithms must use COSE_Sign1 (tag 18) under the CWT tag (61).
+    assert_eq!(
+        token_bytes[0], 0xd8,
+        "First byte should be CBOR tag indicator"
+    );
+    assert_eq!(token_bytes[1], 0x3d, "Should have tag 61 (CWT)");
+    assert_eq!(token_bytes[2], 0xd2, "Should have tag 18 (COSE_Sign1)");
+    assert_eq!(
+        token_bytes[3], 0x84,
+        "Should be followed by 4-element array"
+    );
+}
+
+#[test]
+fn test_ps256_uses_cose_sign1_tags() {
+    let (private_key, _public_key) = ps256_keys();
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    assert_eq!(
+        token_bytes[0], 0xd8,
+        "First byte should be CBOR tag indicator"
+    );
+    assert_eq!(token_bytes[1], 0x3d, "Should have tag 61 (CWT)");
+    assert_eq!(token_bytes[2], 0xd2, "Should have tag 18 (COSE_Sign1)");
+    assert_eq!(
+        token_bytes[3], 0x84,
+        "Should be followed by 4-element array"
+    );
+}
+
+#[test]
+fn test_es256_wrong_key_fails() {
+    let (private_key, _public_key) = es256_keys();
+    // A different, freshly generated P-256 public key that does NOT match.
+    let wrong_public_key = ct_codecs::Base64::decode_to_vec(
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqM7q0vY3RfQ8vJpV4hQ4Z0H8K7m2xZ1k9d0c8N3vWf6m1pQ2rX5sT8uY9wA0bC1dE2fG3hI4jK5lM6nO7pPqQ==",
+        None,
+    );
+    // Even if decoding the bogus key fails or it's structurally invalid, the
+    // point is verification must not succeed against the real signature.
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    if let Ok(wrong_key) = wrong_public_key {
+        assert!(
+            decoded.verify(&wrong_key).is_err(),
+            "Verification should fail with a non-matching public key"
+        );
+    }
+
+    // Verifying against an unrelated but valid PS256 public key must also fail.
+    let (_ps_priv, ps_pub) = ps256_keys();
+    assert!(
+        decoded.verify(&ps_pub).is_err(),
+        "ES256 token should not verify against an RSA public key"
+    );
+}
+
+#[test]
+fn test_ps256_wrong_key_fails() {
+    let (private_key, _public_key) = ps256_keys();
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    // Verify against the ES256 (non-matching) public key.
+    let (_es_priv, es_pub) = es256_keys();
+    assert!(
+        decoded.verify(&es_pub).is_err(),
+        "PS256 token should not verify against an EC public key"
+    );
+}
+
+#[test]
+fn test_es256_tampered_payload_fails() {
+    let (private_key, public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let mut token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Flip a byte near the end of the payload region (before the signature).
+    let idx = token_bytes.len() - 70;
+    token_bytes[idx] ^= 0xFF;
+
+    // Decoding may still succeed structurally, but verification must fail.
+    if let Ok(decoded) = Token::from_bytes(&token_bytes) {
+        assert!(
+            decoded.verify(&public_key).is_err(),
+            "Verification should fail for a tampered ES256 token"
+        );
+    }
+}
+
+#[test]
+fn test_ps256_signatures_are_randomized() {
+    // PSS uses a random salt, so two signatures over the same input differ,
+    // yet both must verify.
+    let (private_key, public_key) = ps256_keys();
+
+    let token_a = build_signed_token(Algorithm::Ps256, &private_key);
+    let token_b = build_signed_token(Algorithm::Ps256, &private_key);
+
+    assert_ne!(
+        token_a.signature, token_b.signature,
+        "PSS signatures should differ due to random salt"
+    );
+
+    token_a.verify(&public_key).expect("token_a should verify");
+    token_b.verify(&public_key).expect("token_b should verify");
+}
+
+#[test]
+fn test_es256_invalid_private_key_errors() {
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Es256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with an invalid ES256 key should yield InvalidKey"
+    );
+}
+
+#[test]
+fn test_ps256_invalid_private_key_errors() {
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Ps256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with an invalid PS256 key should yield InvalidKey"
+    );
+}
+
+#[test]
+fn test_es256_invalid_public_key_errors() {
+    let (private_key, _public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let result = token.verify(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Verifying with an invalid ES256 public key should yield InvalidKey"
+    );
+}
+
+#[test]
+fn test_algorithm_identifier_roundtrip() {
+    for alg in [Algorithm::HmacSha256, Algorithm::Es256, Algorithm::Ps256] {
+        let id = alg.identifier();
+        assert_eq!(Algorithm::from_identifier(id), Some(alg));
+    }
+    assert_eq!(Algorithm::Es256.identifier(), -7);
+    assert_eq!(Algorithm::Ps256.identifier(), -37);
+    assert!(!Algorithm::Es256.is_mac());
+    assert!(!Algorithm::Ps256.is_mac());
+    assert!(Algorithm::HmacSha256.is_mac());
+}

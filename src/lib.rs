@@ -11,7 +11,7 @@
 //!
 //! - CBOR-encoded tokens for compact representation
 //! - Support for both COSE_Sign1 and COSE_Mac0 structures
-//! - HMAC-SHA256 authentication
+//! - HMAC-SHA256 (HS256) authentication, plus ECDSA P-256 (ES256) and RSASSA-PSS (PS256) signatures
 //! - Protected and unprotected headers
 //! - Standard registered claims (issuer, subject, audience, expiration, etc.)
 //! - Custom claims with string, binary, integer, and nested map values

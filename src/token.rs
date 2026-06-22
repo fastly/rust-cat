@@ -4,7 +4,10 @@ use crate::claims::{Claims, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
 use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
-use crate::utils::{compute_hmac_sha256, current_timestamp, verify_hmac_sha256};
+use crate::utils::{
+    compute_es256, compute_hmac_sha256, compute_ps256, current_timestamp, verify_es256,
+    verify_hmac_sha256, verify_ps256,
+};
 use crate::FingerprintType;
 use minicbor::{Decoder, Encoder};
 use std::collections::BTreeMap;
@@ -40,12 +43,23 @@ impl Token {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
 
-        // For HMAC algorithms, use COSE_Mac0 format with CWT tag
-        if let Some(Algorithm::HmacSha256) = self.header.algorithm() {
-            // Apply CWT tag (61)
-            enc.tag(minicbor::data::Tag::new(61))?;
-            // Apply COSE_Mac0 tag (17)
-            enc.tag(minicbor::data::Tag::new(17))?;
+        // Apply the CWT tag (61) followed by the COSE structure tag. HMAC (MAC)
+        // algorithms use COSE_Mac0 (tag 17); asymmetric signature algorithms use
+        // COSE_Sign1 (tag 18).
+        match self.header.algorithm() {
+            Some(alg) if alg.is_mac() => {
+                // Apply CWT tag (61)
+                enc.tag(minicbor::data::Tag::new(61))?;
+                // Apply COSE_Mac0 tag (17)
+                enc.tag(minicbor::data::Tag::new(17))?;
+            }
+            Some(_) => {
+                // Apply CWT tag (61)
+                enc.tag(minicbor::data::Tag::new(61))?;
+                // Apply COSE_Sign1 tag (18)
+                enc.tag(minicbor::data::Tag::new(18))?;
+            }
+            None => {}
         }
 
         // COSE structure array with 4 items
@@ -127,9 +141,14 @@ impl Token {
 
     /// Verify the token signature
     ///
-    /// This function supports both COSE_Sign1 and COSE_Mac0 structures.
-    /// It will first try to verify the signature using the COSE_Sign1 structure,
-    /// and if that fails, it will try the COSE_Mac0 structure.
+    /// The structure used depends on the algorithm in the protected header:
+    ///
+    /// - **HmacSha256** uses the COSE_Mac0 structure. For backward compatibility
+    ///   with tokens produced by other implementations, both the COSE_Sign1 and
+    ///   COSE_Mac0 inputs are tried.
+    /// - **Es256** and **Ps256** are asymmetric signature algorithms and use the
+    ///   COSE_Sign1 structure. For these, `key` must be the SPKI DER-encoded
+    ///   public key.
     pub fn verify(&self, key: &[u8]) -> Result<(), Error> {
         let alg = self.header.algorithm().ok_or_else(|| {
             Error::InvalidFormat("Missing algorithm in protected header".to_string())
@@ -148,6 +167,14 @@ impl Token {
                 // If COSE_Sign1 verification fails, try COSE_Mac0 structure
                 let mac0_input = self.mac0_input()?;
                 verify_hmac_sha256(key, &mac0_input, &self.signature)
+            }
+            Algorithm::Es256 => {
+                let sign1_input = self.sign1_input()?;
+                verify_es256(key, &sign1_input, &self.signature)
+            }
+            Algorithm::Ps256 => {
+                let sign1_input = self.sign1_input()?;
+                verify_ps256(key, &sign1_input, &self.signature)
             }
         }
     }
@@ -1366,6 +1393,12 @@ impl TokenBuilder {
     }
 
     /// Build and sign the token
+    ///
+    /// The `key` is interpreted according to the algorithm in the protected header:
+    ///
+    /// - **HmacSha256**: the raw symmetric MAC key bytes.
+    /// - **Es256**: a PKCS#8 DER-encoded P-256 private key.
+    /// - **Ps256**: a PKCS#8 DER-encoded RSA private key.
     pub fn sign(self, key: &[u8]) -> Result<Token, Error> {
         // Ensure we have an algorithm
         let alg = self.header.algorithm().ok_or_else(|| {
@@ -1380,13 +1413,24 @@ impl TokenBuilder {
             original_payload_bytes: None,
         };
 
-        // Compute signature input based on algorithm
-        // HMAC algorithms use COSE_Mac0 structure, others use COSE_Sign1
+        // Compute signature input based on algorithm.
+        // HMAC (MAC) algorithms use the COSE_Mac0 structure; asymmetric signature
+        // algorithms use the COSE_Sign1 structure.
         let (_signature_input, signature) = match alg {
             Algorithm::HmacSha256 => {
                 let mac_input = token.mac0_input()?;
                 let mac = compute_hmac_sha256(key, &mac_input);
                 (mac_input, mac)
+            }
+            Algorithm::Es256 => {
+                let sign_input = token.sign1_input()?;
+                let sig = compute_es256(key, &sign_input)?;
+                (sign_input, sig)
+            }
+            Algorithm::Ps256 => {
+                let sign_input = token.sign1_input()?;
+                let sig = compute_ps256(key, &sign_input)?;
+                (sign_input, sig)
             }
         };
 

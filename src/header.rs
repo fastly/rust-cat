@@ -20,8 +20,13 @@ use std::collections::BTreeMap;
 /// This enum represents the cryptographic algorithms that can be used
 /// to sign and verify Common Access Tokens.
 ///
-/// Currently, only HMAC-SHA256 is supported, but the design allows for
-/// easy extension to support additional algorithms in the future.
+/// The following algorithms are supported:
+///
+/// - **HmacSha256**: HMAC-SHA256, a symmetric MAC algorithm (COSE_Mac0 structure).
+/// - **Es256**: ECDSA using the P-256 curve and SHA-256, an asymmetric signature
+///   algorithm (COSE_Sign1 structure).
+/// - **Ps256**: RSASSA-PSS using SHA-256 and MGF1 with SHA-256, an asymmetric
+///   signature algorithm (COSE_Sign1 structure).
 ///
 /// # Example
 ///
@@ -31,11 +36,18 @@ use std::collections::BTreeMap;
 /// // Create a token with HMAC-SHA256 algorithm
 /// let alg = Algorithm::HmacSha256;
 /// assert_eq!(alg.identifier(), 5); // COSE algorithm identifier
+///
+/// assert_eq!(Algorithm::Es256.identifier(), -7);
+/// assert_eq!(Algorithm::Ps256.identifier(), -37);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     /// HMAC with SHA-256 (COSE algorithm identifier: 5)
     HmacSha256,
+    /// ECDSA using P-256 curve and SHA-256 (COSE algorithm identifier: -7)
+    Es256,
+    /// RSASSA-PSS using SHA-256 and MGF1 with SHA-256 (COSE algorithm identifier: -37)
+    Ps256,
 }
 
 impl Algorithm {
@@ -43,6 +55,8 @@ impl Algorithm {
     pub fn identifier(&self) -> i32 {
         match self {
             Algorithm::HmacSha256 => cose_algs::HMAC_SHA_256,
+            Algorithm::Es256 => cose_algs::ES256,
+            Algorithm::Ps256 => cose_algs::PS256,
         }
     }
 
@@ -50,8 +64,17 @@ impl Algorithm {
     pub fn from_identifier(id: i32) -> Option<Self> {
         match id {
             cose_algs::HMAC_SHA_256 => Some(Algorithm::HmacSha256),
+            cose_algs::ES256 => Some(Algorithm::Es256),
+            cose_algs::PS256 => Some(Algorithm::Ps256),
             _ => None,
         }
+    }
+
+    /// Returns `true` if this algorithm is a MAC (symmetric) algorithm that uses
+    /// the COSE_Mac0 structure. Returns `false` for asymmetric signature
+    /// algorithms that use the COSE_Sign1 structure.
+    pub fn is_mac(&self) -> bool {
+        matches!(self, Algorithm::HmacSha256)
     }
 }
 

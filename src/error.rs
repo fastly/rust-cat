@@ -26,6 +26,10 @@ pub enum Error {
     #[error("Invalid algorithm: {0}")]
     InvalidAlgorithm(String),
 
+    /// Invalid cryptographic key
+    #[error("Invalid key: {0}")]
+    InvalidKey(String),
+
     /// Signature verification failed
     #[error("Signature verification failed. The token's signature does not match the expected signature")]
     SignatureVerification,
