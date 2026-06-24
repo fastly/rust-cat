@@ -2315,7 +2315,9 @@ fn test_deprecated_verify_still_works_for_hmac() {
     let token_bytes = token.to_bytes().expect("encode");
     let decoded = Token::from_bytes(&token_bytes).expect("decode");
 
-    decoded.verify(key).expect("HMAC verify should still succeed");
+    decoded
+        .verify(key)
+        .expect("HMAC verify should still succeed");
     // And verify_with_key works the same way.
     decoded
         .verify_with_key(VerifyingKey::HmacSha256(key))
