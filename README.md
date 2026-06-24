@@ -31,7 +31,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-common-access-token = "0.2"
+common-access-token = "0.3"
 ```
 
 ## Usage

@@ -1597,20 +1597,28 @@ fn test_es256_tampered_payload_fails() {
     let token = build_signed_token(Algorithm::Es256, &private_key);
     let mut token_bytes = token.to_bytes().expect("Failed to encode token");
 
-    // Flip a byte near the end of the payload region (before the signature).
-    let idx = token_bytes
-        .len()
-        .checked_sub(70)
-        .expect("encoded token should be at least 70 bytes");
-    token_bytes[idx] ^= 0xFF;
+    // Mutate a byte that lives inside the encoded payload but does not alter the
+    // CBOR structure: the custom string claim "custom-string-value" is stored as
+    // a text string, so flipping a byte within its contents keeps the token
+    // structurally decodable while invalidating the signed payload.
+    let needle = b"custom-string-value";
+    let start = token_bytes
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("custom string claim should be present in the encoded token");
+    // Flip a low bit in the middle of the string's contents. XOR with 0x01 keeps
+    // the byte in the ASCII range so the text string stays valid UTF-8 and the
+    // token remains structurally decodable; only the signed bytes change.
+    token_bytes[start + 1] ^= 0x01;
 
-    // Decoding may still succeed structurally, but verification must fail.
-    if let Ok(decoded) = Token::from_bytes(&token_bytes) {
-        assert!(
-            decoded.verify(&public_key).is_err(),
-            "Verification should fail for a tampered ES256 token"
-        );
-    }
+    // Decoding must still succeed (the CBOR structure is intact)...
+    let decoded =
+        Token::from_bytes(&token_bytes).expect("tampered token should still decode structurally");
+    // ...but signature verification must reject the tampered payload.
+    assert!(
+        decoded.verify(&public_key).is_err(),
+        "Verification should fail for a tampered ES256 token"
+    );
 }
 
 #[test]

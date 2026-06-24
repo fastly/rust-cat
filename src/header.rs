@@ -40,7 +40,12 @@ use std::collections::BTreeMap;
 /// assert_eq!(Algorithm::Es256.identifier(), -7);
 /// assert_eq!(Algorithm::Ps256.identifier(), -37);
 /// ```
+///
+/// This enum is marked `#[non_exhaustive]`: future algorithm support can be
+/// added without it being a breaking change, so downstream `match` expressions
+/// must include a wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Algorithm {
     /// HMAC with SHA-256 (COSE algorithm identifier: 5)
     HmacSha256,

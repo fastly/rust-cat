@@ -4,7 +4,12 @@ use std::io::Error as IoError;
 use thiserror::Error;
 
 /// Errors that can occur when working with Common Access Tokens
+///
+/// This enum is marked `#[non_exhaustive]`: new error variants can be added
+/// without it being a breaking change, so downstream `match` expressions must
+/// include a wildcard arm.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Error during CBOR encoding
     #[error("CBOR encoding error: {0}")]
