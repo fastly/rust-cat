@@ -45,7 +45,9 @@ impl Token {
 
         // Apply the CWT tag (61) followed by the COSE structure tag. HMAC (MAC)
         // algorithms use COSE_Mac0 (tag 17); asymmetric signature algorithms use
-        // COSE_Sign1 (tag 18).
+        // COSE_Sign1 (tag 18). If the header carries no algorithm, the bare COSE
+        // array is emitted untagged (`from_bytes` accepts both tagged and
+        // untagged input).
         match self.header.algorithm() {
             Some(alg) if alg.is_mac() => {
                 // Apply CWT tag (61)
