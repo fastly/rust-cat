@@ -8,8 +8,8 @@
 //! elsewhere.
 
 use common_access_token::{
-    current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
-    VerifyingKey,
+    current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder,
+    VerificationOptions, VerifyingKey,
 };
 use ct_codecs::{Base64, Base64UrlSafeNoPadding, Decoder, Encoder, Hex};
 
