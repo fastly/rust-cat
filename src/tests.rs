@@ -1550,23 +1550,23 @@ fn test_ps256_uses_cose_sign1_tags() {
 #[test]
 fn test_es256_wrong_key_fails() {
     let (private_key, _public_key) = es256_keys();
-    // A different, freshly generated P-256 public key that does NOT match.
+    // A different, valid P-256 public key (SPKI DER) that does NOT match the
+    // signing key. Decoding must succeed so the wrong-key path is always
+    // exercised.
     let wrong_public_key = ct_codecs::Base64::decode_to_vec(
-        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqM7q0vY3RfQ8vJpV4hQ4Z0H8K7m2xZ1k9d0c8N3vWf6m1pQ2rX5sT8uY9wA0bC1dE2fG3hI4jK5lM6nO7pPqQ==",
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElkhvSdit+RZ8AdhbXRhGVYDI2ZNfZjZJkufNFB+xYGCR+MwpsILkSP3AVN51C5xG/JtwVcUTDekjURgBYsuDPA==",
         None,
-    );
-    // Even if decoding the bogus key fails or it's structurally invalid, the
-    // point is verification must not succeed against the real signature.
+    )
+    .expect("wrong public key should be valid base64");
+
     let token = build_signed_token(Algorithm::Es256, &private_key);
     let token_bytes = token.to_bytes().expect("Failed to encode token");
     let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
-    if let Ok(wrong_key) = wrong_public_key {
-        assert!(
-            decoded.verify(&wrong_key).is_err(),
-            "Verification should fail with a non-matching public key"
-        );
-    }
+    assert!(
+        decoded.verify(&wrong_public_key).is_err(),
+        "Verification should fail with a non-matching public key"
+    );
 
     // Verifying against an unrelated but valid PS256 public key must also fail.
     let (_ps_priv, ps_pub) = ps256_keys();
@@ -1598,7 +1598,10 @@ fn test_es256_tampered_payload_fails() {
     let mut token_bytes = token.to_bytes().expect("Failed to encode token");
 
     // Flip a byte near the end of the payload region (before the signature).
-    let idx = token_bytes.len() - 70;
+    let idx = token_bytes
+        .len()
+        .checked_sub(70)
+        .expect("encoded token should be at least 70 bytes");
     token_bytes[idx] ^= 0xFF;
 
     // Decoding may still succeed structurally, but verification must fail.

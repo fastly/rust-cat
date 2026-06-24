@@ -11,7 +11,7 @@ repository = "https://github.com/fastly/rust-cat"
 readme = "README.md"
 keywords = ["token", "authentication", "authorization", "cbor", "cose"]
 categories = ["authentication", "cryptography", "web-programming"]
-rust-version = "1.72.0"
+rust-version = "1.88.0"
 
 [dependencies]
 minicbor = { version = "2.1.3", features = ["derive", "std"] }

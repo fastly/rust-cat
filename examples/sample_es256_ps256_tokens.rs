@@ -12,6 +12,11 @@ use common_access_token::{
 };
 use ct_codecs::{Base64, Base64UrlSafeNoPadding, Decoder, Encoder, Hex};
 
+// ⚠️ DEMO KEYS — DO NOT USE IN PRODUCTION.
+// These private keys are committed to a public repository (they are the same
+// keys used by the test suite) and are therefore publicly known. They exist
+// only so this example is self-contained. Generate your own key pair for any
+// real use.
 const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7BOlgwBOMKscTUCaG3RmlSCgUznDdxMn+9Pvoqp4pUOhRANCAARWMcvR3DnF1U15IvgcOyAxr3pJPfOHcF7ESuY+H+ya3LCH03PC1d99/XgN1ldF+wmMxVhY0w9iop10N6tNZDTg";
 const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
 
