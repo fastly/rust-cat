@@ -409,6 +409,53 @@ See the `examples` directory for complete usage examples:
 - `cat_validation.rs`: Shows how to validate CAT-specific claims
 - `extended_cat_claims.rs`: Comprehensive examples of all CAT claims including CATPOR, CATNIP, CATALPN, CATH, CATGEO*, CATTPK, CATDPOP, CATIF
 
+## Benchmarks
+
+The crate ships [Criterion](https://github.com/bheisler/criterion.rs) benchmarks
+measuring **signing time**, **verification time**, and **signature/token size**
+for every supported algorithm (HS256, ES256, PS256).
+
+Run them the native Rust way:
+
+```bash
+cargo bench --bench cat
+```
+
+To produce a shareable report with graphs, run the benchmarks and then the
+report generator. The markdown report and SVG charts need no third-party Python
+packages:
+
+```bash
+cargo bench --bench cat
+python3 scripts/bench_report.py          # add --pdf to also render a PDF
+# or do both at once:
+scripts/run_benchmarks.sh                # --quick for a fast run, --pdf for a PDF
+```
+
+Outputs are written to `target/bench/`:
+
+- `report.md` — markdown summary table, graphs, and notes
+- `report.pdf` — printable PDF (only with `--pdf`)
+- `signing_time.svg`, `verification_time.svg`, `signature_size.svg`, `token_size.svg`
+
+The PDF is rendered with [`fpdf2`](https://pypi.org/project/fpdf2/), a pure-Python
+package with no native dependencies and no browser. Without `--pdf`, `fpdf2` is
+not needed at all.
+
+`scripts/run_benchmarks.sh --pdf` bootstraps a local virtualenv at `.venv` and
+installs `fpdf2` into it automatically (Homebrew's system Python is externally
+managed, so it can't be installed into directly). In CI, where Python isn't
+externally managed, you can skip the venv and just `pip3 install fpdf2` before
+running `python3 scripts/bench_report.py --pdf`.
+
+Indicative results (Apple Silicon, release build — your numbers will vary):
+
+| Algorithm | Signing time | Verification time | Signature size | Token size |
+| --------- | -----------: | ----------------: | -------------: | ---------: |
+| HS256 | ~1.8 µs | ~3.4 µs | 32 B | 150 B |
+| ES256 | ~350 µs | ~220 µs | 64 B | 182 B |
+| PS256 | ~1.16 ms | ~140 µs | 256 B | 376 B |
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
