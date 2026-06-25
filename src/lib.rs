@@ -148,7 +148,7 @@ pub use constants::{
     replay_values, tprint_params, uri_components, FingerprintType,
 };
 pub use error::Error;
-pub use header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
+pub use header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
 pub use token::{Token, TokenBuilder, VerificationOptions};
 pub use utils::current_timestamp;
 

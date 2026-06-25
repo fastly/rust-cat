@@ -3,7 +3,7 @@
 use crate::claims::{Claims, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
-use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
+use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
 use crate::utils::{
     compute_es256, compute_hmac_sha256, compute_ps256, current_timestamp, verify_es256,
     verify_hmac_sha256, verify_ps256,
@@ -25,6 +25,13 @@ pub struct Token {
     pub signature: Vec<u8>,
     /// Original payload bytes (for verification)
     original_payload_bytes: Option<Vec<u8>>,
+    /// Original protected header bytes (for verification)
+    ///
+    /// COSE signs/MACs the exact encoded `protected` bstr, not a re-encoding of
+    /// the decoded header map. Preserving the original bytes from `from_bytes`
+    /// lets verification reproduce the signed input even when the producer's
+    /// CBOR encoding (map ordering, integer width, etc.) differs from ours.
+    original_protected_bytes: Option<Vec<u8>>,
 }
 
 impl Token {
@@ -35,6 +42,7 @@ impl Token {
             claims,
             signature,
             original_payload_bytes: None,
+            original_protected_bytes: None,
         }
     }
 
@@ -43,32 +51,28 @@ impl Token {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
 
-        // Apply the CWT tag (61) followed by the COSE structure tag. HMAC (MAC)
-        // algorithms use COSE_Mac0 (tag 17); asymmetric signature algorithms use
-        // COSE_Sign1 (tag 18). If the header carries no algorithm, the bare COSE
-        // array is emitted untagged (`from_bytes` accepts both tagged and
-        // untagged input).
-        match self.header.algorithm() {
-            Some(alg) if alg.is_mac() => {
-                // Apply CWT tag (61)
-                enc.tag(minicbor::data::Tag::new(61))?;
-                // Apply COSE_Mac0 tag (17)
-                enc.tag(minicbor::data::Tag::new(17))?;
-            }
-            Some(_) => {
-                // Apply CWT tag (61)
-                enc.tag(minicbor::data::Tag::new(61))?;
-                // Apply COSE_Sign1 tag (18)
-                enc.tag(minicbor::data::Tag::new(18))?;
-            }
-            None => {}
+        // Apply the CWT tag (61) followed by the COSE structure tag. The tag is
+        // selected by the algorithm's COSE class (RFC 9052 §8.1, §8.2): MAC
+        // algorithms use COSE_Mac0 (tag 17); signature algorithms use COSE_Sign1
+        // (tag 18). If the header carries no algorithm, the bare COSE array is
+        // emitted untagged (`from_bytes` accepts both tagged and untagged input).
+        if let Some(alg) = self.header.algorithm() {
+            // Apply CWT tag (61)
+            enc.tag(minicbor::data::Tag::new(61))?;
+            let cose_tag = match alg.class() {
+                AlgorithmClass::Mac => 17,       // COSE_Mac0
+                AlgorithmClass::Signature => 18, // COSE_Sign1
+            };
+            enc.tag(minicbor::data::Tag::new(cose_tag))?;
         }
 
         // COSE structure array with 4 items
         enc.array(4)?;
 
-        // 1. Protected header (encoded as CBOR and then as bstr)
-        let protected_bytes = encode_map(&self.header.protected)?;
+        // 1. Protected header (encoded as CBOR and then as bstr).
+        // Reuse the original bytes for a decoded token so the re-encoding is
+        // byte-faithful to the producer's encoding (see `protected_bytes`).
+        let protected_bytes = self.protected_bytes()?;
         enc.bytes(&protected_bytes)?;
 
         // 2. Unprotected header
@@ -115,6 +119,7 @@ impl Token {
         // 1. Protected header
         let protected_bytes = dec.bytes()?;
         let protected = decode_map(protected_bytes)?;
+        let original_protected_bytes = protected_bytes.to_vec();
 
         // 2. Unprotected header
         let unprotected = decode_map_direct(&mut dec)?;
@@ -138,6 +143,7 @@ impl Token {
             claims,
             signature,
             original_payload_bytes: Some(claims_bytes.to_vec()),
+            original_protected_bytes: Some(original_protected_bytes),
         })
     }
 
@@ -696,15 +702,37 @@ impl Token {
         }
     }
 
-    /// Get the COSE_Sign1 signature input
-    fn sign1_input(&self) -> Result<Vec<u8>, Error> {
-        // Sig_structure = [
-        //   context : "Signature1",
-        //   protected : bstr .cbor header_map,
-        //   external_aad : bstr,
-        //   payload : bstr .cbor claims
-        // ]
+    /// Get the encoded protected header bytes, using original bytes if available.
+    ///
+    /// COSE signs the exact `protected` bstr that appears on the wire, so a
+    /// decoded token must reuse the producer's original bytes rather than
+    /// re-encode the header map (which can differ in map ordering, integer
+    /// width, etc.). Newly built tokens have no original bytes and are encoded
+    /// from the header map.
+    fn protected_bytes(&self) -> Result<Vec<u8>, Error> {
+        if let Some(ref original) = self.original_protected_bytes {
+            Ok(original.clone())
+        } else {
+            encode_map(&self.header.protected)
+        }
+    }
 
+    /// Build the COSE signed/MACed input structure for the given context.
+    ///
+    /// Per RFC 9052, the `Sig_structure` for COSE_Sign1 (§4.4) and the
+    /// `MAC_structure` for COSE_Mac0 (§6.3) are the same array shape; they
+    /// differ only in the leading context string (`"Signature1"` vs `"MAC0"`).
+    /// `Sig_structure` also defines a `sign_protected` field, but it is omitted
+    /// for COSE_Sign1, so both structures are 4-element arrays:
+    ///
+    /// ```text
+    /// [ context, protected : bstr .cbor header_map, external_aad : bstr, payload : bstr .cbor claims ]
+    /// ```
+    ///
+    /// The protected header is the exact serialized `bstr` from the token
+    /// (RFC 9052 §4.4: re-encoding must be byte-identical), supplied by
+    /// [`Self::protected_bytes`]. `external_aad` is the empty byte string.
+    fn cose_input(&self, context: &str) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
 
@@ -712,10 +740,10 @@ impl Token {
         enc.array(4)?;
 
         // 1. Context
-        enc.str("Signature1")?;
+        enc.str(context)?;
 
         // 2. Protected header
-        let protected_bytes = encode_map(&self.header.protected)?;
+        let protected_bytes = self.protected_bytes()?;
         enc.bytes(&protected_bytes)?;
 
         // 3. External AAD (empty in our case)
@@ -728,36 +756,14 @@ impl Token {
         Ok(buf)
     }
 
-    /// Get the COSE_Mac0 signature input
+    /// Get the COSE_Sign1 signature input (`Sig_structure`, RFC 9052 §4.4).
+    fn sign1_input(&self) -> Result<Vec<u8>, Error> {
+        self.cose_input(AlgorithmClass::Signature.context())
+    }
+
+    /// Get the COSE_Mac0 MAC input (`MAC_structure`, RFC 9052 §6.3).
     fn mac0_input(&self) -> Result<Vec<u8>, Error> {
-        // Mac_structure = [
-        //   context : "MAC0",
-        //   protected : bstr .cbor header_map,
-        //   external_aad : bstr,
-        //   payload : bstr .cbor claims
-        // ]
-
-        let mut buf = Vec::new();
-        let mut enc = Encoder::new(&mut buf);
-
-        // Start array with 4 items
-        enc.array(4)?;
-
-        // 1. Context
-        enc.str("MAC0")?;
-
-        // 2. Protected header
-        let protected_bytes = encode_map(&self.header.protected)?;
-        enc.bytes(&protected_bytes)?;
-
-        // 3. External AAD (empty in our case)
-        enc.bytes(&[])?;
-
-        // 4. Payload
-        let claims_bytes = self.get_payload_bytes()?;
-        enc.bytes(&claims_bytes)?;
-
-        Ok(buf)
+        self.cose_input(AlgorithmClass::Mac.context())
     }
 
     // Convenience methods for common token operations
@@ -1413,6 +1419,7 @@ impl TokenBuilder {
             claims: self.claims,
             signature: Vec::new(),
             original_payload_bytes: None,
+            original_protected_bytes: None,
         };
 
         // Compute signature input based on algorithm.
@@ -1442,6 +1449,7 @@ impl TokenBuilder {
             claims: token.claims,
             signature,
             original_payload_bytes: None,
+            original_protected_bytes: None,
         })
     }
 }

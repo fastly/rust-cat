@@ -4,7 +4,7 @@ use crate::{
     cat_keys, catm, catr, catreplay, cattprint, catu,
     claims::RegisteredClaims,
     constants::{uri_components, FingerprintType},
-    header::{Algorithm, CborValue, KeyId},
+    header::{Algorithm, AlgorithmClass, CborValue, KeyId},
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
 };
@@ -1674,6 +1674,74 @@ fn test_es256_invalid_public_key_errors() {
     );
 }
 
+/// Regression test for the COSE protected-header interop bug.
+///
+/// COSE signs the *exact* encoded `protected` bstr, not a re-encoding of the
+/// decoded header map. This test mints an "external" ES256 token whose
+/// protected header encodes the `alg` value (-7) in the valid-but-non-canonical
+/// 2-byte form (`0x38 0x06`) rather than the 1-byte form (`0x26`) this crate's
+/// encoder emits. Verification must reproduce the original bytes; if it
+/// re-encodes the header map instead, the signed input differs and a valid
+/// token is rejected.
+#[test]
+fn test_es256_verifies_noncanonical_protected_header() {
+    let (private_key, public_key) = es256_keys();
+
+    // Protected header map {1: -7} with -7 encoded as the non-canonical
+    // 2-byte negative int (0x38 0x06). Canonical encoding would be `a1 01 26`.
+    let protected: &[u8] = &[0xa1, 0x01, 0x38, 0x06];
+    // Payload: an empty claims map (`a0`). Its contents are irrelevant to the
+    // signed-bytes question; only the protected header encoding matters here.
+    let payload: &[u8] = &[0xa0];
+
+    // Build the COSE Sig_structure exactly as sign1_input() does, but over the
+    // non-canonical protected bytes, then sign it.
+    let mut sig_structure = vec![0x84]; // array(4)
+    sig_structure.push(0x6a); // text(10)
+    sig_structure.extend_from_slice(b"Signature1");
+    sig_structure.push(0x40 | protected.len() as u8); // bstr(protected.len())
+    sig_structure.extend_from_slice(protected);
+    sig_structure.push(0x40); // bstr(0) external_aad
+    sig_structure.push(0x40 | payload.len() as u8); // bstr(payload.len())
+    sig_structure.extend_from_slice(payload);
+
+    let signature = crate::utils::compute_es256(&private_key, &sig_structure)
+        .expect("compute_es256 over non-canonical structure");
+    assert_eq!(signature.len(), 64);
+
+    // Assemble the full tagged COSE_Sign1 token with the same protected bytes.
+    let mut token_bytes = vec![0xd8, 0x3d, 0xd2]; // tag 61 (CWT), tag 18 (COSE_Sign1)
+    token_bytes.push(0x84); // array(4)
+    token_bytes.push(0x40 | protected.len() as u8); // protected bstr
+    token_bytes.extend_from_slice(protected);
+    token_bytes.push(0xa0); // unprotected: empty map
+    token_bytes.push(0x40 | payload.len() as u8); // payload bstr
+    token_bytes.extend_from_slice(payload);
+    token_bytes.push(0x58); // bstr, 1-byte length follows
+    token_bytes.push(64);
+    token_bytes.extend_from_slice(&signature);
+
+    let decoded = Token::from_bytes(&token_bytes).expect("decode non-canonical token");
+    assert_eq!(decoded.header.algorithm(), Some(Algorithm::Es256));
+    decoded
+        .verify(&public_key)
+        .expect("non-canonical protected header should still verify");
+
+    // Re-encoding a decoded token must be byte-faithful to the producer's
+    // encoding (RFC 9052 §4.4), so the non-canonical protected bytes survive a
+    // round-trip and the token still verifies. A canonicalizing re-encode would
+    // turn `a1 01 38 06` back into `a1 01 26` and break the signature.
+    let reencoded = decoded.to_bytes().expect("re-encode non-canonical token");
+    assert_eq!(
+        reencoded, token_bytes,
+        "to_bytes() must preserve the original protected header bytes"
+    );
+    Token::from_bytes(&reencoded)
+        .expect("decode round-tripped token")
+        .verify(&public_key)
+        .expect("round-tripped token should still verify");
+}
+
 #[test]
 fn test_algorithm_identifier_roundtrip() {
     for alg in [Algorithm::HmacSha256, Algorithm::Es256, Algorithm::Ps256] {
@@ -1685,4 +1753,21 @@ fn test_algorithm_identifier_roundtrip() {
     assert!(!Algorithm::Es256.is_mac());
     assert!(!Algorithm::Ps256.is_mac());
     assert!(Algorithm::HmacSha256.is_mac());
+}
+
+#[test]
+fn test_algorithm_class_and_context() {
+    // MAC algorithms map to COSE_Mac0 / "MAC0"; signature algorithms map to
+    // COSE_Sign1 / "Signature1" (RFC 9052 §4.4, §6.3).
+    assert_eq!(Algorithm::HmacSha256.class(), AlgorithmClass::Mac);
+    assert_eq!(Algorithm::Es256.class(), AlgorithmClass::Signature);
+    assert_eq!(Algorithm::Ps256.class(), AlgorithmClass::Signature);
+
+    assert_eq!(AlgorithmClass::Mac.context(), "MAC0");
+    assert_eq!(AlgorithmClass::Signature.context(), "Signature1");
+
+    // is_mac() is defined in terms of the class, so they must agree.
+    for alg in [Algorithm::HmacSha256, Algorithm::Es256, Algorithm::Ps256] {
+        assert_eq!(alg.is_mac(), alg.class() == AlgorithmClass::Mac);
+    }
 }

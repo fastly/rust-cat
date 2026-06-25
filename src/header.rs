@@ -55,6 +55,36 @@ pub enum Algorithm {
     Ps256,
 }
 
+/// The COSE class an algorithm belongs to.
+///
+/// COSE partitions algorithms into classes with distinct message structures:
+/// signature algorithms (RFC 9053 §2) are "used with the COSE_Signature and
+/// COSE_Sign1 structures", while MAC algorithms (RFC 9053 §3) are "used in the
+/// COSE_Mac and COSE_Mac0 structures" (RFC 9052 §8.1, §8.2). This crate encodes
+/// that convention: the class determines both the CBOR tag emitted on the wire
+/// (COSE_Mac0 = 17, COSE_Sign1 = 18) and the context string used in the signed
+/// input (RFC 9052 §4.4, §6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlgorithmClass {
+    /// A MAC algorithm using the COSE_Mac0 structure.
+    Mac,
+    /// A digital signature algorithm using the COSE_Sign1 structure.
+    Signature,
+}
+
+impl AlgorithmClass {
+    /// The context string for this class's signed/MACed input structure.
+    ///
+    /// Per RFC 9052, the `Sig_structure` for COSE_Sign1 uses `"Signature1"`
+    /// (§4.4) and the `MAC_structure` for COSE_Mac0 uses `"MAC0"` (§6.3).
+    pub fn context(&self) -> &'static str {
+        match self {
+            AlgorithmClass::Mac => "MAC0",
+            AlgorithmClass::Signature => "Signature1",
+        }
+    }
+}
+
 impl Algorithm {
     /// Get the algorithm identifier as defined in the COSE spec
     pub fn identifier(&self) -> i32 {
@@ -75,11 +105,26 @@ impl Algorithm {
         }
     }
 
+    /// The COSE class this algorithm belongs to.
+    ///
+    /// This is the single source of truth for the algorithm → message-structure
+    /// mapping: MAC algorithms (RFC 9053 §3) use COSE_Mac0, signature algorithms
+    /// (RFC 9053 §2) use COSE_Sign1. The `match` is exhaustive (no wildcard), so
+    /// adding a new `Algorithm` variant is a compile error here until its class
+    /// is declared — preventing a new algorithm from silently defaulting to the
+    /// wrong structure.
+    pub fn class(&self) -> AlgorithmClass {
+        match self {
+            Algorithm::HmacSha256 => AlgorithmClass::Mac,
+            Algorithm::Es256 | Algorithm::Ps256 => AlgorithmClass::Signature,
+        }
+    }
+
     /// Returns `true` if this algorithm is a MAC (symmetric) algorithm that uses
     /// the COSE_Mac0 structure. Returns `false` for asymmetric signature
     /// algorithms that use the COSE_Sign1 structure.
     pub fn is_mac(&self) -> bool {
-        matches!(self, Algorithm::HmacSha256)
+        matches!(self.class(), AlgorithmClass::Mac)
     }
 }
 
