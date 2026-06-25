@@ -83,6 +83,19 @@ impl AlgorithmClass {
             AlgorithmClass::Signature => "Signature1",
         }
     }
+
+    /// The CBOR tag emitted on the wire for this class's COSE structure.
+    ///
+    /// Per RFC 9052 §8.1/§8.2, COSE_Mac0 is tag 17 and COSE_Sign1 is tag 18.
+    /// This lives beside [`Self::context`] so both wire-encoding facts the class
+    /// determines (the tag and the context string) are co-located and stay in
+    /// sync as classes are added.
+    pub fn cbor_tag(&self) -> u64 {
+        match self {
+            AlgorithmClass::Mac => 17,       // COSE_Mac0
+            AlgorithmClass::Signature => 18, // COSE_Sign1
+        }
+    }
 }
 
 impl Algorithm {

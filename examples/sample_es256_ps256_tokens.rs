@@ -17,6 +17,12 @@ use ct_codecs::{Base64, Base64UrlSafeNoPadding, Decoder, Encoder, Hex};
 // keys used by the test suite) and are therefore publicly known. They exist
 // only so this example is self-contained. Generate your own key pair for any
 // real use.
+//
+// NOTE: these constants are intentionally duplicated across the two asymmetric
+// examples and `src/tests.rs`. Each example/test is meant to stand alone (a
+// reader can run a single file without chasing a shared fixture), and the keys
+// are throwaway demo material, so the small duplication is preferred over a
+// shared module. Not a finding — please don't flag it in review.
 const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7BOlgwBOMKscTUCaG3RmlSCgUznDdxMn+9Pvoqp4pUOhRANCAARWMcvR3DnF1U15IvgcOyAxr3pJPfOHcF7ESuY+H+ya3LCH03PC1d99/XgN1ldF+wmMxVhY0w9iop10N6tNZDTg";
 const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
 

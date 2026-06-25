@@ -74,18 +74,36 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
         .map_err(|_| Error::SignatureVerification)
 }
 
+/// Minimum accepted RSA modulus size, in bits.
+///
+/// RSA moduli below 2048 bits are considered too weak to provide meaningful
+/// security (NIST SP 800-57 deprecated 1024-bit RSA, and 512-bit moduli are
+/// factorable on commodity hardware). Neither the `rsa` crate's DER decoders
+/// nor PSS verification impose any size floor, so without this check a token
+/// signed under a tiny key would be accepted and could be forged by an
+/// attacker. We enforce the floor on both the signing and verification paths.
+const MIN_RSA_KEY_BITS: usize = 2048;
+
 /// Compute a PS256 (RSASSA-PSS with SHA-256 and MGF1-SHA-256) signature over `data`.
 ///
-/// `key` must be a PKCS#8 DER-encoded RSA private key. PSS uses a random salt, so
-/// an OS-provided RNG is used (WASM-friendly via `getrandom`).
+/// `key` must be a PKCS#8 DER-encoded RSA private key whose modulus is at least
+/// [`MIN_RSA_KEY_BITS`] bits. PSS uses a random salt, so an OS-provided RNG is
+/// used (WASM-friendly via `getrandom`).
 pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     use rsa::pkcs8::DecodePrivateKey;
     use rsa::pss::SigningKey;
     use rsa::signature::{RandomizedSigner, SignatureEncoding};
+    use rsa::traits::PublicKeyParts;
     use rsa::RsaPrivateKey;
 
     let private_key = RsaPrivateKey::from_pkcs8_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 private key: {e}")))?;
+    let key_bits = private_key.n().bits();
+    if key_bits < MIN_RSA_KEY_BITS {
+        return Err(Error::InvalidKey(format!(
+            "PS256 RSA key is too small: {key_bits} bits (minimum {MIN_RSA_KEY_BITS})"
+        )));
+    }
     let signing_key = SigningKey::<sha2::Sha256>::new(private_key);
     let mut rng = rand_core::OsRng;
     let signature = signing_key.sign_with_rng(&mut rng, data);
@@ -94,15 +112,23 @@ pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Verify a PS256 (RSASSA-PSS with SHA-256 and MGF1-SHA-256) signature over `data`.
 ///
-/// `key` must be an SPKI DER-encoded RSA public key.
+/// `key` must be an SPKI DER-encoded RSA public key whose modulus is at least
+/// [`MIN_RSA_KEY_BITS`] bits; smaller keys are rejected as insecure.
 pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Error> {
     use rsa::pkcs8::DecodePublicKey;
     use rsa::pss::{Signature, VerifyingKey};
     use rsa::signature::Verifier;
+    use rsa::traits::PublicKeyParts;
     use rsa::RsaPublicKey;
 
     let public_key = RsaPublicKey::from_public_key_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 public key: {e}")))?;
+    let key_bits = public_key.n().bits();
+    if key_bits < MIN_RSA_KEY_BITS {
+        return Err(Error::InvalidKey(format!(
+            "PS256 RSA key is too small: {key_bits} bits (minimum {MIN_RSA_KEY_BITS})"
+        )));
+    }
     let verifying_key = VerifyingKey::<sha2::Sha256>::new(public_key);
     let signature = Signature::try_from(signature).map_err(|_| Error::SignatureVerification)?;
     verifying_key

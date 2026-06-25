@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message — so without this a third party could derive a second valid signature
   for an unchanged token. Requiring low-S makes the signature bytes a stable
   identity for a token.
+- PS256 rejects RSA keys whose modulus is smaller than 2048 bits, on both the
+  signing and verification paths. Smaller moduli (e.g. 512- or 1024-bit) are too
+  weak to be secure — a 512-bit modulus is factorable on commodity hardware —
+  and neither the DER decoders nor PSS verification impose a floor, so without
+  this an undersized key would sign and verify normally.
 
 ## [0.2.7] - 2025-11-05
 

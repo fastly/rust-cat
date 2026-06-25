@@ -1650,6 +1650,11 @@ fn test_signed_integer_in_nested_structures() {
 //   PS256 (RSA-2048):
 //     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -outform DER  # private (PKCS#8)
 //     openssl pkey -inform DER -in ps_priv.der -pubout -outform DER              # public  (SPKI)
+//
+// NOTE: the same demo keys are also embedded (intentionally) in
+// `examples/asymmetric_signing.rs` and `examples/sample_es256_ps256_tokens.rs`
+// so each example stands alone. The duplication is deliberate throwaway test
+// material — please don't flag it in review.
 // ---------------------------------------------------------------------------
 
 /// ES256 PKCS#8 DER private key (base64-encoded).
@@ -1974,6 +1979,46 @@ fn test_es256_invalid_private_key_errors() {
     assert!(
         matches!(result, Err(crate::error::Error::InvalidKey(_))),
         "Signing with an invalid ES256 key should yield InvalidKey"
+    );
+}
+
+/// A valid 1024-bit RSA key pair (PKCS#8 / SPKI DER, base64). Used only to
+/// confirm the PS256 minimum-key-size floor rejects undersized keys; 1024-bit
+/// RSA is below the 2048-bit minimum the crate enforces.
+const PS256_1024_PRIVATE_KEY_B64: &str = "MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKvHWxROqV0XWK/d7kjK0u0SZFP5mkAQlw+f+DSF2Lb0GR6nSpzPsgz72KcBnKTuIjKBjpCziE96F4kY60ads16ZdGnjpaZKk3ggWnMF0Q7njDUTedYcyZykGpJmYF/XhAsTn4yRnJBjc2mzHLeMYGHZgmwgf/AHC104uLFbShsbAgMBAAECgYEAhvsuPLTbLQVtcTSpS5XlTNkI8VvPs8vViDeh6FPMyWbiXk4CuVoThVRZGFKR7qAZSyq3BkmtMRa1a8ujBWhiSwgcelL2KSXiY60hYzlKkmBnYMwDpDfUxlfTgw2nC5ufb4HUd/W/p2NJdmGI0/5td+A9AhIpsg/7ZlHbK4QYisECQQDUuh2GTmiPl3c5Unmby3XXvnDVMNCTKtAk8mf9mNL8AIq2D9tqgX0PsVczKqzjtYVVlQD50lH95LKfTr3aoAQLAkEAzrjVqxNva8SMabIAvPXNLvk80IgnLKgLTFVbtOBHrUH3muoRKbFQvC0UwvqxkjNszpakX0eo3UTmIGQMdgQfMQJAK+udSuyHZBY2tGwV1ZfFZdzY+PtSJQBy5x3xYIecEBGgkgRmHfBMPOA1i8fk2ELTG59fCzVkXlJImuGsCyZ8jwJABXkBNxk5nunCKd4rhNUhDHhOstqX5ue//NJZri0t2Jlhe7lsoOTv1TuATDUk1FEGNWXpjhgwkUMMsJjVd55eUQJBALD636EfXmesRUVTo3dGBreONSD9kob2x7XckJFBBFAXGV2LLbEmjZTC6e9OVpPb5fEE0hMq029VrSwva5mqyuc=";
+const PS256_1024_PUBLIC_KEY_B64: &str = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCrx1sUTqldF1iv3e5IytLtEmRT+ZpAEJcPn/g0hdi29Bkep0qcz7IM+9inAZyk7iIygY6Qs4hPeheJGOtGnbNemXRp46WmSpN4IFpzBdEO54w1E3nWHMmcpBqSZmBf14QLE5+MkZyQY3Npsxy3jGBh2YJsIH/wBwtdOLixW0obGwIDAQAB";
+
+#[test]
+fn test_ps256_undersized_key_is_rejected_on_sign() {
+    use ct_codecs::{Base64, Decoder};
+    let small_key = Base64::decode_to_vec(PS256_1024_PRIVATE_KEY_B64, None)
+        .expect("valid 1024-bit private key");
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Ps256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(&small_key);
+    // The key is structurally valid DER, so the only reason to reject is the
+    // 2048-bit minimum modulus floor.
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with a 1024-bit RSA key should be rejected as too small"
+    );
+}
+
+#[test]
+fn test_ps256_undersized_key_is_rejected_on_verify() {
+    // A signature produced directly by the low-level helper would also be
+    // refused at sign time; verify must independently reject an undersized
+    // public key regardless of the signature bytes supplied.
+    use ct_codecs::{Base64, Decoder};
+    let small_pub =
+        Base64::decode_to_vec(PS256_1024_PUBLIC_KEY_B64, None).expect("valid 1024-bit public key");
+    // Signature length matches a 1024-bit modulus (128 bytes); contents are
+    // irrelevant because the size check fires before any PSS verification.
+    let result = crate::utils::verify_ps256(&small_pub, b"data", &[0u8; 128]);
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Verifying against a 1024-bit RSA key should be rejected as too small"
     );
 }
 

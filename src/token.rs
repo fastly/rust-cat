@@ -86,11 +86,10 @@ impl Token {
         if let Some(alg) = self.header.algorithm() {
             // Apply CWT tag (61)
             enc.tag(minicbor::data::Tag::new(61))?;
-            let cose_tag = match alg.class() {
-                AlgorithmClass::Mac => 17,       // COSE_Mac0
-                AlgorithmClass::Signature => 18, // COSE_Sign1
-            };
-            enc.tag(minicbor::data::Tag::new(cose_tag))?;
+            // The COSE structure tag is owned by the algorithm's class (see
+            // `AlgorithmClass::cbor_tag`), keeping it in sync with the matching
+            // context string used in the signed input.
+            enc.tag(minicbor::data::Tag::new(alg.class().cbor_tag()))?;
         }
 
         // COSE structure array with 4 items
@@ -211,6 +210,11 @@ impl Token {
                 let mac0_input = self.mac0_input()?;
                 verify_hmac_sha256(key, &mac0_input, &self.signature)
             }
+            // Es256 and Ps256 share the same COSE_Sign1 input but are kept as
+            // separate arms (rather than merged into `Es256 | Ps256` with a
+            // nested match) so each maps directly to its own verify primitive.
+            // The duplication is one line; a merged arm would re-introduce a
+            // nested `match alg` that is harder to read for no real savings.
             Algorithm::Es256 => {
                 let sign1_input = self.sign1_input()?;
                 verify_es256(key, &sign1_input, &self.signature)
@@ -1497,6 +1501,10 @@ impl TokenBuilder {
                 let mac = compute_hmac_sha256(key, &mac_input);
                 (mac_input, mac)
             }
+            // Es256 and Ps256 share the COSE_Sign1 input but stay as separate
+            // arms (not `Es256 | Ps256` with a nested match) so each maps
+            // directly to its own signing primitive — the one duplicated line is
+            // clearer than a merged arm that re-introduces a nested `match alg`.
             Algorithm::Es256 => {
                 let sign_input = token.sign1_input()?;
                 let sig = compute_es256(key, &sign_input)?;
