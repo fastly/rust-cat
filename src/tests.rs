@@ -1740,10 +1740,60 @@ fn test_ps256_signatures_are_randomized() {
     let token_a = build();
     let token_b = build();
 
+    // Sanity check the premise: the signed payloads are identical, so the only
+    // thing that can differ between the two signatures is the PSS salt.
+    assert_eq!(
+        token_a
+            .to_signed_payload_bytes()
+            .expect("token_a signed payload"),
+        token_b
+            .to_signed_payload_bytes()
+            .expect("token_b signed payload"),
+        "signed payloads should be identical so the salt is the only entropy"
+    );
+
     assert_ne!(
         token_a.signature, token_b.signature,
         "PSS signatures should differ due to random salt"
     );
+
+    // Confirm the randomization is observable in the full on-the-wire bytes and
+    // is confined to the signature. In COSE_Sign1 the signature is the final
+    // `bstr` element, so the two encodings must share an identical prefix (tags,
+    // protected/unprotected headers, payload, and the signature's bstr header)
+    // and differ only across the trailing signature bytes.
+    let bytes_a = token_a.to_bytes().expect("Failed to encode token_a");
+    let bytes_b = token_b.to_bytes().expect("Failed to encode token_b");
+
+    // RSA-2048 PSS signatures are a fixed 256 bytes, so both encodings have the
+    // same length and the signature occupies the same trailing region in each.
+    assert_eq!(
+        token_a.signature.len(),
+        token_b.signature.len(),
+        "PS256 signatures should be the same fixed length"
+    );
+    assert_eq!(
+        bytes_a.len(),
+        bytes_b.len(),
+        "encoded tokens should be the same length"
+    );
+
+    let split = bytes_a.len() - token_a.signature.len();
+
+    assert_eq!(
+        bytes_a[..split],
+        bytes_b[..split],
+        "everything before the signature (headers + payload) must be identical"
+    );
+    assert_ne!(
+        bytes_a[split..],
+        bytes_b[split..],
+        "the trailing signature bytes must differ due to the random PSS salt"
+    );
+    // The trailing region is exactly the signature, so the observed difference
+    // is the salt and nothing else.
+    assert_eq!(&bytes_a[split..], token_a.signature.as_slice());
+    assert_eq!(&bytes_b[split..], token_b.signature.as_slice());
 
     token_a.verify(&public_key).expect("token_a should verify");
     token_b.verify(&public_key).expect("token_b should verify");

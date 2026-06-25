@@ -46,6 +46,20 @@ impl Token {
         }
     }
 
+    /// Return the encoded `payload` bstr that the signature or MAC is computed
+    /// over (the CBOR-encoded claims map).
+    ///
+    /// For a token decoded via [`Self::from_bytes`] whose `claims` are unchanged,
+    /// this is the producer's exact original bytes; if `claims` were mutated, it
+    /// is a fresh encoding of the current claims. This is the same payload that
+    /// [`Self::to_bytes`] emits and that signing/verification cover, so two
+    /// tokens with identical claims produce identical signed payload bytes
+    /// (useful for asserting that any signature difference comes from elsewhere,
+    /// e.g. PSS salt randomization).
+    pub fn to_signed_payload_bytes(&self) -> Result<Vec<u8>, Error> {
+        self.get_payload_bytes()
+    }
+
     /// Encode the token to CBOR bytes
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
@@ -693,30 +707,48 @@ impl Token {
 
     // Note: signature_input method removed as we now use mac0_input for HMAC algorithms
 
-    /// Get the encoded payload bytes, using original bytes if available
+    /// Get the encoded payload bytes.
+    ///
+    /// For a token decoded via [`Self::from_bytes`] whose `claims` have not been
+    /// changed, the producer's exact original bytes are reused so the signed
+    /// `payload` bstr is byte-faithful (a re-encode can differ in map ordering,
+    /// integer width, etc. — see [`Self::protected_bytes`]).
+    ///
+    /// The `claims` field is public, so it may have been mutated after decoding.
+    /// The cached bytes are only reused when they still describe the *current*
+    /// claims; otherwise the claims are re-encoded. This keeps `to_bytes()` from
+    /// silently emitting a token that carries the producer's original claims
+    /// while the caller believes it carries their mutated ones. A re-encoded
+    /// payload no longer matches the original signature/MAC, so such a token
+    /// fails verification rather than passing with the wrong claims.
     fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
-        if let Some(ref original) = self.original_payload_bytes {
-            // Use original bytes for verification
-            Ok(original.clone())
-        } else {
-            // Encode claims for newly created tokens
-            let claims_map = self.claims.to_map();
-            encode_map(&claims_map)
+        let claims_bytes = encode_map(&self.claims.to_map())?;
+        match self.original_payload_bytes {
+            // Reuse the producer's exact bytes only when they decode to the same
+            // claims the token currently holds.
+            Some(ref original) if payload_matches(original, &self.claims) => Ok(original.clone()),
+            _ => Ok(claims_bytes),
         }
     }
 
-    /// Get the encoded protected header bytes, using original bytes if available.
+    /// Get the encoded protected header bytes.
     ///
     /// COSE signs the exact `protected` bstr that appears on the wire, so a
-    /// decoded token must reuse the producer's original bytes rather than
-    /// re-encode the header map (which can differ in map ordering, integer
-    /// width, etc.). Newly built tokens have no original bytes and are encoded
-    /// from the header map.
+    /// decoded token reuses the producer's original bytes rather than re-encode
+    /// the header map (which can differ in map ordering, integer width, etc.).
+    /// Newly built tokens have no original bytes and are encoded from the header
+    /// map.
+    ///
+    /// As with [`Self::get_payload_bytes`], the `header` field is public; the
+    /// cached bytes are only reused when they still describe the current
+    /// protected header, so a mutated header is re-encoded rather than silently
+    /// replaced by the producer's original bytes.
     fn protected_bytes(&self) -> Result<Vec<u8>, Error> {
-        if let Some(ref original) = self.original_protected_bytes {
-            Ok(original.clone())
-        } else {
-            encode_map(&self.header.protected)
+        match self.original_protected_bytes {
+            Some(ref original) if protected_matches(original, &self.header.protected) => {
+                Ok(original.clone())
+            }
+            _ => encode_map(&self.header.protected),
         }
     }
 
@@ -1458,6 +1490,29 @@ impl TokenBuilder {
 }
 
 // Helper functions for CBOR encoding/decoding
+
+/// Whether the cached original payload `bytes` still describe `claims`.
+///
+/// Decodes the producer's original `payload` bstr and compares it, by logical
+/// content (the claims map), against the token's current claims. A mismatch
+/// means the public `claims` field was mutated after decoding, so the cached
+/// bytes must not be reused. Undecodable original bytes also count as a
+/// mismatch, falling back to a fresh encode.
+fn payload_matches(bytes: &[u8], claims: &Claims) -> bool {
+    match decode_map(bytes) {
+        Ok(decoded) => decoded == claims.to_map(),
+        Err(_) => false,
+    }
+}
+
+/// Whether the cached original protected-header `bytes` still describe
+/// `protected`. See [`payload_matches`]; same logic for the protected header.
+fn protected_matches(bytes: &[u8], protected: &HeaderMap) -> bool {
+    match decode_map(bytes) {
+        Ok(decoded) => &decoded == protected,
+        Err(_) => false,
+    }
+}
 
 fn encode_map(map: &HeaderMap) -> Result<Vec<u8>, Error> {
     let mut buf = Vec::new();
