@@ -598,6 +598,38 @@ fn test_mac0_token_verification_with_original_bytes() {
 }
 
 #[test]
+fn test_decoded_token_reencodes_without_breaking_signature() {
+    // Regression test: `to_bytes()` must preserve the exact signed bytes of a
+    // decoded token (both protected header and payload), otherwise re-encoding
+    // a token parsed from the wire would emit a different payload/protected
+    // bstr while keeping the original MAC/signature, producing a token that no
+    // longer verifies. Uses the external COSE_Mac0 fixture (tags 61 + 17).
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let key = b"testSecret";
+
+    // The original decoded token verifies.
+    let token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    assert!(
+        token.verify(key).is_ok(),
+        "Original decoded token should verify with testSecret"
+    );
+
+    // Re-encode it, parse the re-encoded bytes, and verify again. This fails if
+    // `to_bytes()` re-encodes the payload (or protected header) instead of
+    // reusing the preserved original bytes.
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+    let reparsed = Token::from_bytes(&reencoded).expect("Failed to parse re-encoded token");
+    assert!(
+        reparsed.verify(key).is_ok(),
+        "Re-encoded token should still verify with testSecret"
+    );
+}
+
+#[test]
 fn test_created_token_format() {
     // Test that tokens created by this library have the correct format
     let key = b"testSecret";

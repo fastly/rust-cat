@@ -78,9 +78,12 @@ impl Token {
         // 2. Unprotected header
         encode_map_direct(&self.header.unprotected, &mut enc)?;
 
-        // 3. Payload (encoded as CBOR and then as bstr)
-        let claims_map = self.claims.to_map();
-        let claims_bytes = encode_map(&claims_map)?;
+        // 3. Payload (encoded as CBOR and then as bstr).
+        // Reuse the original bytes for a decoded token so the re-encoding is
+        // byte-faithful to the producer's encoding (see `get_payload_bytes`).
+        // This is the exact payload covered by the signature/MAC, so emitting
+        // a re-encoded payload would invalidate a decoded token's signature.
+        let claims_bytes = self.get_payload_bytes()?;
         enc.bytes(&claims_bytes)?;
 
         // 4. Signature/MAC
