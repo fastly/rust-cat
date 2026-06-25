@@ -84,6 +84,19 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
 /// attacker. We enforce the floor on both the signing and verification paths.
 const MIN_RSA_KEY_BITS: usize = 2048;
 
+/// Reject an RSA modulus smaller than [`MIN_RSA_KEY_BITS`].
+///
+/// Shared by `compute_ps256` and `verify_ps256` so the floor policy (and its
+/// error message) cannot drift between the signing and verification paths.
+fn ensure_rsa_key_bits(key_bits: usize) -> Result<(), Error> {
+    if key_bits < MIN_RSA_KEY_BITS {
+        return Err(Error::InvalidKey(format!(
+            "PS256 RSA key is too small: {key_bits} bits (minimum {MIN_RSA_KEY_BITS})"
+        )));
+    }
+    Ok(())
+}
+
 /// Compute a PS256 (RSASSA-PSS with SHA-256 and MGF1-SHA-256) signature over `data`.
 ///
 /// `key` must be a PKCS#8 DER-encoded RSA private key whose modulus is at least
@@ -98,12 +111,7 @@ pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
 
     let private_key = RsaPrivateKey::from_pkcs8_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 private key: {e}")))?;
-    let key_bits = private_key.n().bits();
-    if key_bits < MIN_RSA_KEY_BITS {
-        return Err(Error::InvalidKey(format!(
-            "PS256 RSA key is too small: {key_bits} bits (minimum {MIN_RSA_KEY_BITS})"
-        )));
-    }
+    ensure_rsa_key_bits(private_key.n().bits())?;
     let signing_key = SigningKey::<sha2::Sha256>::new(private_key);
     let mut rng = rand_core::OsRng;
     let signature = signing_key.sign_with_rng(&mut rng, data);
@@ -123,12 +131,7 @@ pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
 
     let public_key = RsaPublicKey::from_public_key_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 public key: {e}")))?;
-    let key_bits = public_key.n().bits();
-    if key_bits < MIN_RSA_KEY_BITS {
-        return Err(Error::InvalidKey(format!(
-            "PS256 RSA key is too small: {key_bits} bits (minimum {MIN_RSA_KEY_BITS})"
-        )));
-    }
+    ensure_rsa_key_bits(public_key.n().bits())?;
     let verifying_key = VerifyingKey::<sha2::Sha256>::new(public_key);
     let signature = Signature::try_from(signature).map_err(|_| Error::SignatureVerification)?;
     verifying_key

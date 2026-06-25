@@ -59,20 +59,6 @@ impl Token {
         }
     }
 
-    /// Return the encoded `payload` bstr that the signature or MAC is computed
-    /// over (the CBOR-encoded claims map).
-    ///
-    /// For a token decoded via [`Self::from_bytes`] whose `claims` are unchanged,
-    /// this is the producer's exact original bytes; if `claims` were mutated, it
-    /// is a fresh encoding of the current claims. This is the same payload that
-    /// [`Self::to_bytes`] emits and that signing/verification cover, so two
-    /// tokens with identical claims produce identical signed payload bytes
-    /// (useful for asserting that any signature difference comes from elsewhere,
-    /// e.g. PSS salt randomization).
-    pub fn to_signed_payload_bytes(&self) -> Result<Vec<u8>, Error> {
-        self.get_payload_bytes()
-    }
-
     /// Encode the token to CBOR bytes
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
@@ -757,7 +743,12 @@ impl Token {
     /// map, so it is robust to claims the `Claims` struct drops on decode (e.g.
     /// an `aud` encoded as a CBOR array): both sides lose the same information,
     /// so an unmutated token still matches and keeps its byte-faithful bytes.
-    fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
+    ///
+    /// Crate-internal (`pub(crate)`) so tests can assert that two tokens with
+    /// identical claims produce identical signed payload bytes (e.g. that a PSS
+    /// signature difference comes solely from salt randomization), without
+    /// committing this to the public API surface.
+    pub(crate) fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
         // Encoding is deferred to the fallback arm so the common
         // decoded-and-unmutated path (e.g. during verify/to_bytes) avoids a
         // wasted re-encode, matching the sibling `protected_bytes`.

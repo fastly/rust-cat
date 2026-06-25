@@ -1914,12 +1914,8 @@ fn test_ps256_signatures_are_randomized() {
     // Sanity check the premise: the signed payloads are identical, so the only
     // thing that can differ between the two signatures is the PSS salt.
     assert_eq!(
-        token_a
-            .to_signed_payload_bytes()
-            .expect("token_a signed payload"),
-        token_b
-            .to_signed_payload_bytes()
-            .expect("token_b signed payload"),
+        token_a.get_payload_bytes().expect("token_a signed payload"),
+        token_b.get_payload_bytes().expect("token_b signed payload"),
         "signed payloads should be identical so the salt is the only entropy"
     );
 
