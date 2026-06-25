@@ -618,7 +618,7 @@ fn test_decoded_token_reencodes_without_breaking_signature() {
     // The original decoded token verifies.
     let token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
     assert!(
-        token.verify(key).is_ok(),
+        token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
         "Original decoded token should verify with testSecret"
     );
 
@@ -628,7 +628,9 @@ fn test_decoded_token_reencodes_without_breaking_signature() {
     let reencoded = token.to_bytes().expect("Failed to re-encode token");
     let reparsed = Token::from_bytes(&reencoded).expect("Failed to parse re-encoded token");
     assert!(
-        reparsed.verify(key).is_ok(),
+        reparsed
+            .verify_with_key(VerifyingKey::HmacSha256(key))
+            .is_ok(),
         "Re-encoded token should still verify with testSecret"
     );
 }
@@ -662,7 +664,9 @@ fn test_mutated_claims_are_reflected_in_to_bytes() {
     // And because the payload changed, the original MAC no longer matches:
     // the token must fail verification rather than pass with the wrong claims.
     assert!(
-        reparsed.verify(b"testSecret").is_err(),
+        reparsed
+            .verify_with_key(VerifyingKey::HmacSha256(b"testSecret"))
+            .is_err(),
         "A token whose claims were mutated after decode must not verify with the original MAC"
     );
 }
@@ -776,7 +780,7 @@ fn test_aud_as_array_verifies_and_roundtrips() {
 
     // Regression: an unmutated token must still verify against the original key.
     assert!(
-        token.verify(key).is_ok(),
+        token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
         "unmutated aud-as-array token must verify (byte-faithful payload reuse)"
     );
 
@@ -788,7 +792,7 @@ fn test_aud_as_array_verifies_and_roundtrips() {
     );
     Token::from_bytes(&reencoded)
         .expect("decode round-tripped token")
-        .verify(key)
+        .verify_with_key(VerifyingKey::HmacSha256(key))
         .expect("round-tripped aud-as-array token should still verify");
 }
 
@@ -819,7 +823,9 @@ fn test_aud_as_array_mutation_is_reflected() {
         "mutation on a lossy token must be reflected on the wire"
     );
     assert!(
-        reparsed.verify(key).is_err(),
+        reparsed
+            .verify_with_key(VerifyingKey::HmacSha256(key))
+            .is_err(),
         "a mutated payload must not verify against the original MAC"
     );
 }
@@ -843,7 +849,7 @@ fn test_cti_as_text_verifies_and_roundtrips() {
         "text-valued cti cannot be represented as bytes and is dropped"
     );
     assert!(
-        token.verify(key).is_ok(),
+        token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
         "unmutated cti-as-text token must verify"
     );
     assert_eq!(
@@ -2194,7 +2200,7 @@ fn test_es256_verifies_noncanonical_protected_header() {
     let decoded = Token::from_bytes(&token_bytes).expect("decode non-canonical token");
     assert_eq!(decoded.header.algorithm(), Some(Algorithm::Es256));
     decoded
-        .verify(&public_key)
+        .verify_with_key(VerifyingKey::Es256(&public_key))
         .expect("non-canonical protected header should still verify");
 
     // Re-encoding a decoded token must be byte-faithful to the producer's
@@ -2208,7 +2214,7 @@ fn test_es256_verifies_noncanonical_protected_header() {
     );
     Token::from_bytes(&reencoded)
         .expect("decode round-tripped token")
-        .verify(&public_key)
+        .verify_with_key(VerifyingKey::Es256(&public_key))
         .expect("round-tripped token should still verify");
 }
 
