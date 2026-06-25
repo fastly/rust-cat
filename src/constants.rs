@@ -224,4 +224,8 @@ pub mod cose_labels {
 pub mod cose_algs {
     /// HMAC with SHA-256 (COSE algorithm identifier: 5)
     pub const HMAC_SHA_256: i32 = 5;
+    /// ECDSA using P-256 curve and SHA-256 (COSE algorithm identifier: -7)
+    pub const ES256: i32 = -7;
+    /// RSASSA-PSS using SHA-256 and MGF1 with SHA-256 (COSE algorithm identifier: -37)
+    pub const PS256: i32 = -37;
 }

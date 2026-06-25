@@ -4,7 +4,12 @@ use std::io::Error as IoError;
 use thiserror::Error;
 
 /// Errors that can occur when working with Common Access Tokens
+///
+/// This enum is marked `#[non_exhaustive]`: new error variants can be added
+/// without it being a breaking change, so downstream `match` expressions must
+/// include a wildcard arm.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Error during CBOR encoding
     #[error("CBOR encoding error: {0}")]
@@ -25,6 +30,10 @@ pub enum Error {
     /// Invalid algorithm
     #[error("Invalid algorithm: {0}")]
     InvalidAlgorithm(String),
+
+    /// Invalid cryptographic key
+    #[error("Invalid key: {0}")]
+    InvalidKey(String),
 
     /// Signature verification failed
     #[error("Signature verification failed. The token's signature does not match the expected signature")]

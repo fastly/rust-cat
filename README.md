@@ -21,7 +21,7 @@ This library uses the [minicbor](https://crates.io/crates/minicbor) crate for CB
 - Custom Claims: Support for application-specific claims with string, binary, integer, and nested map values
 - CAT-specific Claims: Support for CAT-specific claims like CATU (URI restrictions), CATR (token renewal), CATM (HTTP methods), and more
 - Key Identifiers: Support for both binary and string key identifiers (kid)
-- HMAC-SHA256 Authentication: Secure token signing and verification
+- Multiple Signing Algorithms: HMAC-SHA256 (HS256) MACs, plus ECDSA P-256 (ES256) and RSASSA-PSS (PS256) asymmetric signatures
 - Comprehensive Verification: Validate signatures, expiration times, and other claims
 - CAT-specific Validation: Validate URI restrictions, HTTP method constraints, and replay protection
 
@@ -31,7 +31,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-common-access-token = "0.2"
+common-access-token = "0.3"
 ```
 
 ## Usage
@@ -155,6 +155,40 @@ COSE_Mac0 = [
   payload: bstr .cbor claims,
   signature: bstr
 ]
+```
+
+Asymmetric signature algorithms (ES256, PS256) instead use the COSE_Sign1 structure with CWT (tag 61) and COSE_Sign1 (tag 18) CBOR tags. The array layout is identical; only the final element is a signature rather than a MAC.
+
+### Signing Algorithms
+
+The library supports three algorithms, selected via `Algorithm` on the builder. The bytes passed to `sign()` and `verify()` are interpreted according to the algorithm:
+
+| Algorithm           | COSE id | Structure  | `sign()` key                     | `verify()` key                  |
+| ------------------- | ------- | ---------- | -------------------------------- | ------------------------------- |
+| `Algorithm::HmacSha256` | 5   | COSE_Mac0  | raw symmetric key bytes          | raw symmetric key bytes         |
+| `Algorithm::Es256`  | -7      | COSE_Sign1 | PKCS#8 DER P-256 private key      | SPKI DER P-256 public key       |
+| `Algorithm::Ps256`  | -37     | COSE_Sign1 | PKCS#8 DER RSA private key        | SPKI DER RSA public key         |
+
+ES256 is ECDSA over the NIST P-256 curve with SHA-256; signatures are the fixed 64-byte COSE `r || s` form. PS256 is RSASSA-PSS with SHA-256 and MGF1-SHA-256. PSS uses a random salt, so each signature over the same input differs while all remain valid.
+
+```rust
+use common_access_token::{Algorithm, KeyId, RegisteredClaims, TokenBuilder, current_timestamp};
+
+// `private_key` is PKCS#8 DER; `public_key` is SPKI DER.
+let token = TokenBuilder::new()
+    .algorithm(Algorithm::Es256)
+    .protected_key_id(KeyId::string("my-ec-key"))
+    .registered_claims(
+        RegisteredClaims::new()
+            .with_issuer("example-issuer")
+            .with_expiration(current_timestamp() + 3600),
+    )
+    .sign(private_key)
+    .expect("Failed to sign token");
+
+let token_bytes = token.to_bytes().expect("Failed to encode token");
+let decoded = common_access_token::Token::from_bytes(&token_bytes).expect("decode");
+decoded.verify(public_key).expect("Failed to verify ES256 signature");
 ```
 
 ### Nested Map Claims

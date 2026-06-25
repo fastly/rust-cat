@@ -4,7 +4,7 @@ use crate::{
     cat_keys, catm, catr, catreplay, cattprint, catu,
     claims::RegisteredClaims,
     constants::{uri_components, FingerprintType},
-    header::{Algorithm, CborValue, KeyId},
+    header::{Algorithm, AlgorithmClass, CborValue, KeyId},
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
 };
@@ -594,6 +594,258 @@ fn test_mac0_token_verification_with_original_bytes() {
     assert_eq!(
         token.claims.registered.sub,
         Some("5b8ed6b2-fca4-4ed5-915f-58ce1b0f304b".to_string())
+    );
+}
+
+#[test]
+fn test_decoded_token_reencodes_without_breaking_signature() {
+    // Regression test: `to_bytes()` must preserve the exact signed bytes of a
+    // decoded token (both protected header and payload), otherwise re-encoding
+    // a token parsed from the wire would emit a different payload/protected
+    // bstr while keeping the original MAC/signature, producing a token that no
+    // longer verifies. Uses the external COSE_Mac0 fixture (tags 61 + 17).
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let key = b"testSecret";
+
+    // The original decoded token verifies.
+    let token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    assert!(
+        token.verify(key).is_ok(),
+        "Original decoded token should verify with testSecret"
+    );
+
+    // Re-encode it, parse the re-encoded bytes, and verify again. This fails if
+    // `to_bytes()` re-encodes the payload (or protected header) instead of
+    // reusing the preserved original bytes.
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+    let reparsed = Token::from_bytes(&reencoded).expect("Failed to parse re-encoded token");
+    assert!(
+        reparsed.verify(key).is_ok(),
+        "Re-encoded token should still verify with testSecret"
+    );
+}
+
+#[test]
+fn test_mutated_claims_are_reflected_in_to_bytes() {
+    // The `claims` field is public, so a decoded token can be mutated before
+    // re-encoding. `to_bytes()` must reflect the mutation rather than silently
+    // emit the producer's original (cached) payload bytes. Without the cache
+    // validation in `get_payload_bytes`, this emits a token still carrying the
+    // original `iss`.
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let mut token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    assert_eq!(token.claims.registered.iss, Some("primevideo".to_string()));
+
+    // Mutate a claim, then re-encode and re-parse.
+    token.claims.registered.iss = Some("mutated-issuer".to_string());
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+    let reparsed = Token::from_bytes(&reencoded).expect("Failed to parse re-encoded token");
+
+    // The mutation must be reflected on the wire.
+    assert_eq!(
+        reparsed.claims.registered.iss,
+        Some("mutated-issuer".to_string()),
+        "to_bytes() must emit the mutated claims, not the cached original bytes"
+    );
+
+    // And because the payload changed, the original MAC no longer matches:
+    // the token must fail verification rather than pass with the wrong claims.
+    assert!(
+        reparsed.verify(b"testSecret").is_err(),
+        "A token whose claims were mutated after decode must not verify with the original MAC"
+    );
+}
+
+#[test]
+fn test_unmutated_decoded_token_reuses_original_bytes() {
+    // Counterpart to the mutation test: when the claims are *not* changed, the
+    // cache-validation path must still reuse the producer's exact original
+    // bytes so the round-trip stays byte-faithful (the non-canonical-encoding
+    // interop guarantee).
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+
+    // Byte-for-byte identical to the producer's original encoding.
+    assert_eq!(
+        reencoded, token_bytes,
+        "Unmutated decoded token must re-encode byte-faithfully"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Lossy-claim round-trip regression tests.
+//
+// `Claims` cannot represent every spec-valid CWT payload: a registered claim
+// carried with an unexpected CBOR type is dropped by `Claims::from_map`. The
+// canonical case is `aud` (key 3) encoded as a CBOR *array* of audiences, which
+// RFC 8392 / RFC 7519 permit but `RegisteredClaims.aud: Option<String>` cannot
+// hold. A `cti` (key 7) encoded as text is a second, non-conformant-producer
+// trigger.
+//
+// These tokens must still verify (their signed payload bytes are preserved
+// byte-faithfully) and round-trip without the dropped claim breaking the
+// signature. They regress if `to_bytes`/`verify` re-encode the lossy `Claims`
+// projection instead of reusing the producer's original payload bytes.
+// ---------------------------------------------------------------------------
+
+/// Append a CBOR byte string (`bstr`) header + contents for `data`.
+fn push_bstr(buf: &mut Vec<u8>, data: &[u8]) {
+    let len = data.len();
+    if len < 24 {
+        buf.push(0x40 | len as u8);
+    } else if len < 256 {
+        buf.push(0x58);
+        buf.push(len as u8);
+    } else {
+        buf.push(0x59);
+        buf.push((len >> 8) as u8);
+        buf.push((len & 0xff) as u8);
+    }
+    buf.extend_from_slice(data);
+}
+
+/// Append a CBOR text string for `s` (only short strings, len < 24).
+fn push_text(buf: &mut Vec<u8>, s: &str) {
+    let b = s.as_bytes();
+    assert!(b.len() < 24, "test helper only handles short text");
+    buf.push(0x60 | b.len() as u8);
+    buf.extend_from_slice(b);
+}
+
+/// Hand-build a tagged COSE_Mac0 (CWT) token from raw protected/payload bstr
+/// contents, MACed with HMAC-SHA256 over the `MAC_structure` using `key`.
+fn build_mac0_token_bytes(protected: &[u8], payload: &[u8], key: &[u8]) -> Vec<u8> {
+    // MAC_structure = ["MAC0", protected : bstr, external_aad : bstr(empty), payload : bstr]
+    let mut mac_structure = vec![0x84]; // array(4)
+    push_text(&mut mac_structure, "MAC0");
+    push_bstr(&mut mac_structure, protected);
+    push_bstr(&mut mac_structure, &[]); // external_aad
+    push_bstr(&mut mac_structure, payload);
+
+    let mac = crate::utils::compute_hmac_sha256(key, &mac_structure);
+
+    // Tagged COSE_Mac0: tag 61 (CWT), tag 17 (COSE_Mac0), array(4).
+    let mut token = vec![0xd8, 0x3d, 0xd1, 0x84];
+    push_bstr(&mut token, protected); // 1. protected header
+    token.push(0xa0); // 2. unprotected: empty map
+    push_bstr(&mut token, payload); // 3. payload
+    push_bstr(&mut token, &mac); // 4. MAC
+    token
+}
+
+#[test]
+fn test_aud_as_array_verifies_and_roundtrips() {
+    // A spec-valid CWT whose `aud` (key 3) is a CBOR array of audiences — a
+    // shape `RegisteredClaims.aud: Option<String>` cannot represent, so the
+    // claim is dropped from the decoded `Claims`. The producer's signed payload
+    // bytes must still be preserved so the token verifies and round-trips.
+    let key = b"testSecret";
+
+    // Protected header { 1 (alg): 5 (HS256) }.
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+
+    // Payload { 3 (aud): ["aud-one", "aud-two"] }.
+    let mut payload = vec![0xa1, 0x03, 0x82]; // map(1), key 3, array(2)
+    push_text(&mut payload, "aud-one");
+    push_text(&mut payload, "aud-two");
+
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let token = Token::from_bytes(&token_bytes).expect("decode aud-as-array token");
+
+    // The lossy drop is real and documented: the typed accessor sees no `aud`.
+    assert_eq!(
+        token.claims.registered.aud, None,
+        "array-valued aud cannot be represented by Option<String> and is dropped"
+    );
+
+    // Regression: an unmutated token must still verify against the original key.
+    assert!(
+        token.verify(key).is_ok(),
+        "unmutated aud-as-array token must verify (byte-faithful payload reuse)"
+    );
+
+    // And it must re-encode byte-for-byte (the dropped claim survives on the wire).
+    let reencoded = token.to_bytes().expect("re-encode aud-as-array token");
+    assert_eq!(
+        reencoded, token_bytes,
+        "unmutated lossy token must re-encode byte-faithfully, preserving aud"
+    );
+    Token::from_bytes(&reencoded)
+        .expect("decode round-tripped token")
+        .verify(key)
+        .expect("round-tripped aud-as-array token should still verify");
+}
+
+#[test]
+fn test_aud_as_array_mutation_is_reflected() {
+    // Counterpart: mutating a claim on a lossy token must still be reflected on
+    // the wire (the cache must not silently re-emit the producer's bytes), and
+    // the mutated payload must then fail verification against the original MAC.
+    let key = b"testSecret";
+
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+    let mut payload = vec![0xa1, 0x03, 0x82];
+    push_text(&mut payload, "aud-one");
+    push_text(&mut payload, "aud-two");
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let mut token = Token::from_bytes(&token_bytes).expect("decode aud-as-array token");
+
+    // Set a (representable) issuer claim that was not present in the original.
+    token.claims.registered.iss = Some("mutated-issuer".to_string());
+
+    let reencoded = token.to_bytes().expect("re-encode mutated token");
+    let reparsed = Token::from_bytes(&reencoded).expect("decode mutated token");
+
+    assert_eq!(
+        reparsed.claims.registered.iss,
+        Some("mutated-issuer".to_string()),
+        "mutation on a lossy token must be reflected on the wire"
+    );
+    assert!(
+        reparsed.verify(key).is_err(),
+        "a mutated payload must not verify against the original MAC"
+    );
+}
+
+#[test]
+fn test_cti_as_text_verifies_and_roundtrips() {
+    // A second lossy trigger: `cti` (key 7) carried as text rather than bytes.
+    // `RegisteredClaims::from_map` only accepts `cti` as bytes, so it is dropped,
+    // yet the token must still verify and round-trip byte-faithfully.
+    let key = b"testSecret";
+
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+    // Payload { 7 (cti): "cti-as-text" }.
+    let mut payload = vec![0xa1, 0x07];
+    push_text(&mut payload, "cti-as-text");
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let token = Token::from_bytes(&token_bytes).expect("decode cti-as-text token");
+    assert_eq!(
+        token.claims.registered.cti, None,
+        "text-valued cti cannot be represented as bytes and is dropped"
+    );
+    assert!(
+        token.verify(key).is_ok(),
+        "unmutated cti-as-text token must verify"
+    );
+    assert_eq!(
+        token.to_bytes().expect("re-encode cti-as-text token"),
+        token_bytes,
+        "unmutated lossy token must re-encode byte-faithfully"
     );
 }
 
@@ -1381,4 +1633,584 @@ fn test_signed_integer_in_nested_structures() {
     } else {
         panic!("Custom claim 300 not found or has wrong type");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Asymmetric algorithm tests (ES256 / PS256)
+//
+// The key material below is generated once with OpenSSL and embedded as
+// base64-encoded DER so the tests are deterministic and fast (RSA key
+// generation at test time would be slow).
+//
+//   ES256 (P-256):
+//     openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out es.pem
+//     openssl pkcs8 -topk8 -nocrypt -in es.pem -outform DER         # private (PKCS#8)
+//     openssl pkey -in es.pem -pubout -outform DER                  # public  (SPKI)
+//
+//   PS256 (RSA-2048):
+//     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -outform DER  # private (PKCS#8)
+//     openssl pkey -inform DER -in ps_priv.der -pubout -outform DER              # public  (SPKI)
+//
+// NOTE: the same demo keys are also embedded (intentionally) in
+// `examples/asymmetric_signing.rs` and `examples/sample_es256_ps256_tokens.rs`
+// so each example stands alone. The duplication is deliberate throwaway test
+// material — please don't flag it in review.
+// ---------------------------------------------------------------------------
+
+/// ES256 PKCS#8 DER private key (base64-encoded).
+const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7BOlgwBOMKscTUCaG3RmlSCgUznDdxMn+9Pvoqp4pUOhRANCAARWMcvR3DnF1U15IvgcOyAxr3pJPfOHcF7ESuY+H+ya3LCH03PC1d99/XgN1ldF+wmMxVhY0w9iop10N6tNZDTg";
+/// ES256 SPKI DER public key (base64-encoded), matching the private key above.
+const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
+
+/// PS256 PKCS#8 DER private key (base64-encoded).
+const PS256_PRIVATE_KEY_B64: &str = "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCHjA5iauwvo2sRB529iV1c+p+WuGFzk5EUGFFLYoIHxAwo/rSmZ2/D00epwb4WzOxA4c8+1QA+0rZIN35Fti9Wiunt0b1DgC0tuSglNzpEE5gjhTDcAWZOBPOCMt9pKEuuQC4eqBRxPoG5Y14dVi46/aQOQSqU5I0T3cbeLliTzjXkrvdqySFXMGpM9/I469SZRxZbDgB8wUcB2nTIuwOokjN/Vp+BpMM5QmR66J6aFNi8LqCmQv3grUI1kM1fqrC3az/YcyXcDvjinagyXsGYgW2ZpXIf2760UXv/bASAOO01sgI8zxbIDdG6Vd+7iPhr4b/v6QIj6rpuURFfns2LAgMBAAECggEAH9CdXbdYCZRzYHNnsGGqEtVWmQNdCEo2Lr/IcQfFmnoHGqYyE67Kmm2gb/VkHyjpOQ9nXAmVvakqlMfFsSoicU84uhPVNx9CO22uwRF18R2iQ5ATGEiR0TUzTLeRHbcSEGvLB3IPHkd8Hl327K7aOglntNrR2lHM1UFkWKkLLGHObPoLBSTQLjX5JkvtpUuBgnPVlfBUc5al9+CH+m/SiC4BvVWo4hiHEKCQgMIQ/Dh8UtS9Vk91FIizqKpqBXE6+PNmAnn9ZwRjZoRNBSLn0paAyiEXXdr5rV8zeYU0ktY40J9qWEFOJmTYII4pUK1U8tukrQ0w4LUm17f8zMkufQKBgQC7MGcSrbFWVjlEwA760sG6NKOZb5sL+2etIVAJyfSoGrwr8H4aQA1WFP+pmmlCWsLZj8qfTYSyocwfT/p9aY9Na7ftyks+q1QSsDF+D7frgxmITJeCSwiPa7jnOTrmReqAEOyPn8IlytHIhJbaPxzDxPf572QIAIBgsWhdygn21QKBgQC5X9agS0u2Joypz36ZIilbgbtgmSvFAE/22U0il+3GgXQbjmxPCip1UZm1cBgmLhq12bxU1xYxJpGVPWhEsmkIrOkEfNf/RYlSvVLzbuZLQxeB1g5FDrFb1EbaegrFznv/rFonyXMeRyJ7PHtDttfN5jxNTxTiV3BQ4uobgsai3wKBgFEiW6q26mSXnt7zuApzi1CgPEDnJPb+kyNxivWTOZ4baHBLHv1VwfILy/zBVtpR6J7QOmzt9pROmOEBk3sEY/6Ur/Y7dn3FWP14rRsMyRUlj82KFSl+SEmR0WU3YxYoO8oii8Z84nPrAx68iX4zWM5p82m7n0nwnbRLcQcl6Ue5AoGACjVN42viEnjS/DLx/MrVzjU5tVsZ/vJCdQyIY+RL8seENlREgKHFrso8lbJDki6tx9/isCVcEn7WO4qzKD1O7WxgNKAPYP5aTpUgcUllIzXhoIPCK2lguPbapANefoAdcfnyyQgd78fpDTJKc3MpNSx9m6BEPSalh77HN5afC68CgYBSHR2vz1GuUzHSgU+3xKqGSc+jlroetJ1dC5913Z+9eawW7QrRfmSod+JfEiJSw8eS+5/rGYjKihMtNPyqzadRvZtp0QGZrrm1k1/vqqeeH5Uq6AgH/2Djql4tUvC3gmgpHjY7RyPDv6v+u+L9C6MP0Nu5vVfQwpAmX9bsjn/Tjw==";
+/// PS256 SPKI DER public key (base64-encoded), matching the private key above.
+const PS256_PUBLIC_KEY_B64: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAh4wOYmrsL6NrEQedvYldXPqflrhhc5ORFBhRS2KCB8QMKP60pmdvw9NHqcG+FszsQOHPPtUAPtK2SDd+RbYvVorp7dG9Q4AtLbkoJTc6RBOYI4Uw3AFmTgTzgjLfaShLrkAuHqgUcT6BuWNeHVYuOv2kDkEqlOSNE93G3i5Yk8415K73askhVzBqTPfyOOvUmUcWWw4AfMFHAdp0yLsDqJIzf1afgaTDOUJkeuiemhTYvC6gpkL94K1CNZDNX6qwt2s/2HMl3A744p2oMl7BmIFtmaVyH9u+tFF7/2wEgDjtNbICPM8WyA3RulXfu4j4a+G/7+kCI+q6blERX57NiwIDAQAB";
+
+fn es256_keys() -> (Vec<u8>, Vec<u8>) {
+    use ct_codecs::{Base64, Decoder};
+    (
+        Base64::decode_to_vec(ES256_PRIVATE_KEY_B64, None).expect("valid ES256 private key"),
+        Base64::decode_to_vec(ES256_PUBLIC_KEY_B64, None).expect("valid ES256 public key"),
+    )
+}
+
+fn ps256_keys() -> (Vec<u8>, Vec<u8>) {
+    use ct_codecs::{Base64, Decoder};
+    (
+        Base64::decode_to_vec(PS256_PRIVATE_KEY_B64, None).expect("valid PS256 private key"),
+        Base64::decode_to_vec(PS256_PUBLIC_KEY_B64, None).expect("valid PS256 public key"),
+    )
+}
+
+fn build_signed_token(alg: Algorithm, private_key: &[u8]) -> Token {
+    TokenBuilder::new()
+        .algorithm(alg)
+        .protected_key_id(KeyId::string("asym-key-1"))
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_issuer("issuer")
+                .with_subject("subject")
+                .with_audience("audience")
+                .with_expiration(current_timestamp() + 3600)
+                .with_not_before(current_timestamp())
+                .with_issued_at(current_timestamp()),
+        )
+        .custom_string(100, "custom-string-value")
+        .custom_int(102, 12345)
+        .sign(private_key)
+        .expect("Failed to sign token")
+}
+
+#[test]
+fn test_es256_sign_and_verify() {
+    let (private_key, public_key) = es256_keys();
+
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+
+    // ES256 signatures are the fixed 64-byte COSE form (r || s).
+    assert_eq!(
+        token.signature.len(),
+        64,
+        "ES256 signature should be 64 bytes"
+    );
+    assert_eq!(token.header.algorithm(), Some(Algorithm::Es256));
+
+    // Round-trip through encoding.
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    decoded
+        .verify(&public_key)
+        .expect("Failed to verify ES256 signature");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .verify_nbf(true)
+        .expected_issuer("issuer")
+        .expected_audience("audience");
+    decoded
+        .verify_claims(&options)
+        .expect("Failed to verify claims");
+
+    assert_eq!(decoded.get_custom_string(100), Some("custom-string-value"));
+    assert_eq!(decoded.get_custom_int(102), Some(12345));
+}
+
+#[test]
+fn test_ps256_sign_and_verify() {
+    let (private_key, public_key) = ps256_keys();
+
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    assert_eq!(token.header.algorithm(), Some(Algorithm::Ps256));
+    // RSA-2048 PSS signature is 256 bytes.
+    assert_eq!(
+        token.signature.len(),
+        256,
+        "PS256 signature should be 256 bytes"
+    );
+
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    decoded
+        .verify(&public_key)
+        .expect("Failed to verify PS256 signature");
+
+    let options = VerificationOptions::new()
+        .verify_exp(true)
+        .verify_nbf(true)
+        .expected_issuer("issuer")
+        .expected_audience("audience");
+    decoded
+        .verify_claims(&options)
+        .expect("Failed to verify claims");
+}
+
+#[test]
+fn test_es256_uses_cose_sign1_tags() {
+    let (private_key, _public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Asymmetric algorithms must use COSE_Sign1 (tag 18) under the CWT tag (61).
+    assert_eq!(
+        token_bytes[0], 0xd8,
+        "First byte should be CBOR tag indicator"
+    );
+    assert_eq!(token_bytes[1], 0x3d, "Should have tag 61 (CWT)");
+    assert_eq!(token_bytes[2], 0xd2, "Should have tag 18 (COSE_Sign1)");
+    assert_eq!(
+        token_bytes[3], 0x84,
+        "Should be followed by 4-element array"
+    );
+}
+
+#[test]
+fn test_ps256_uses_cose_sign1_tags() {
+    let (private_key, _public_key) = ps256_keys();
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    assert_eq!(
+        token_bytes[0], 0xd8,
+        "First byte should be CBOR tag indicator"
+    );
+    assert_eq!(token_bytes[1], 0x3d, "Should have tag 61 (CWT)");
+    assert_eq!(token_bytes[2], 0xd2, "Should have tag 18 (COSE_Sign1)");
+    assert_eq!(
+        token_bytes[3], 0x84,
+        "Should be followed by 4-element array"
+    );
+}
+
+#[test]
+fn test_es256_wrong_key_fails() {
+    let (private_key, _public_key) = es256_keys();
+    // A different, valid P-256 public key (SPKI DER) that does NOT match the
+    // signing key. Decoding must succeed so the wrong-key path is always
+    // exercised.
+    let wrong_public_key = ct_codecs::Base64::decode_to_vec(
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAElkhvSdit+RZ8AdhbXRhGVYDI2ZNfZjZJkufNFB+xYGCR+MwpsILkSP3AVN51C5xG/JtwVcUTDekjURgBYsuDPA==",
+        None,
+    )
+    .expect("wrong public key should be valid base64");
+
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    assert!(
+        decoded.verify(&wrong_public_key).is_err(),
+        "Verification should fail with a non-matching public key"
+    );
+
+    // Verifying against an unrelated but valid PS256 public key must also fail.
+    let (_ps_priv, ps_pub) = ps256_keys();
+    assert!(
+        decoded.verify(&ps_pub).is_err(),
+        "ES256 token should not verify against an RSA public key"
+    );
+}
+
+#[test]
+fn test_ps256_wrong_key_fails() {
+    let (private_key, _public_key) = ps256_keys();
+    let token = build_signed_token(Algorithm::Ps256, &private_key);
+    let token_bytes = token.to_bytes().expect("Failed to encode token");
+    let decoded = Token::from_bytes(&token_bytes).expect("Failed to decode token");
+
+    // Verify against the ES256 (non-matching) public key.
+    let (_es_priv, es_pub) = es256_keys();
+    assert!(
+        decoded.verify(&es_pub).is_err(),
+        "PS256 token should not verify against an EC public key"
+    );
+}
+
+#[test]
+fn test_es256_tampered_payload_fails() {
+    let (private_key, public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let mut token_bytes = token.to_bytes().expect("Failed to encode token");
+
+    // Mutate a byte that lives inside the encoded payload but does not alter the
+    // CBOR structure: the custom string claim "custom-string-value" is stored as
+    // a text string, so flipping a byte within its contents keeps the token
+    // structurally decodable while invalidating the signed payload.
+    let needle = b"custom-string-value";
+    let start = token_bytes
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("custom string claim should be present in the encoded token");
+    // Flip a low bit in the middle of the string's contents. XOR with 0x01 keeps
+    // the byte in the ASCII range so the text string stays valid UTF-8 and the
+    // token remains structurally decodable; only the signed bytes change.
+    token_bytes[start + 1] ^= 0x01;
+
+    // Decoding must still succeed (the CBOR structure is intact)...
+    let decoded =
+        Token::from_bytes(&token_bytes).expect("tampered token should still decode structurally");
+    // ...but signature verification must reject the tampered payload.
+    assert!(
+        decoded.verify(&public_key).is_err(),
+        "Verification should fail for a tampered ES256 token"
+    );
+}
+
+#[test]
+fn test_ps256_signatures_are_randomized() {
+    // PSS uses a random salt, so two signatures over the same input differ,
+    // yet both must verify.
+    let (private_key, public_key) = ps256_keys();
+
+    // Build both tokens with identical, fixed claims (no calls to
+    // `current_timestamp()`) so the signed payload is byte-for-byte the same.
+    // The PSS salt is then the only source of entropy, so any difference in
+    // the signatures is attributable solely to salt randomization rather than
+    // to differing claims.
+    let build = || {
+        TokenBuilder::new()
+            .algorithm(Algorithm::Ps256)
+            .protected_key_id(KeyId::string("asym-key-1"))
+            .registered_claims(
+                RegisteredClaims::new()
+                    .with_issuer("issuer")
+                    .with_subject("subject")
+                    .with_audience("audience")
+                    .with_expiration(2_000_000_000)
+                    .with_not_before(1_000_000_000)
+                    .with_issued_at(1_000_000_000),
+            )
+            .custom_string(100, "custom-string-value")
+            .custom_int(102, 12345)
+            .sign(&private_key)
+            .expect("Failed to sign token")
+    };
+
+    let token_a = build();
+    let token_b = build();
+
+    // Sanity check the premise: the signed payloads are identical, so the only
+    // thing that can differ between the two signatures is the PSS salt.
+    assert_eq!(
+        token_a.get_payload_bytes().expect("token_a signed payload"),
+        token_b.get_payload_bytes().expect("token_b signed payload"),
+        "signed payloads should be identical so the salt is the only entropy"
+    );
+
+    assert_ne!(
+        token_a.signature, token_b.signature,
+        "PSS signatures should differ due to random salt"
+    );
+
+    // Confirm the randomization is observable in the full on-the-wire bytes and
+    // is confined to the signature. In COSE_Sign1 the signature is the final
+    // `bstr` element, so the two encodings must share an identical prefix (tags,
+    // protected/unprotected headers, payload, and the signature's bstr header)
+    // and differ only across the trailing signature bytes.
+    let bytes_a = token_a.to_bytes().expect("Failed to encode token_a");
+    let bytes_b = token_b.to_bytes().expect("Failed to encode token_b");
+
+    // RSA-2048 PSS signatures are a fixed 256 bytes, so both encodings have the
+    // same length and the signature occupies the same trailing region in each.
+    assert_eq!(
+        token_a.signature.len(),
+        token_b.signature.len(),
+        "PS256 signatures should be the same fixed length"
+    );
+    assert_eq!(
+        bytes_a.len(),
+        bytes_b.len(),
+        "encoded tokens should be the same length"
+    );
+
+    let split = bytes_a.len() - token_a.signature.len();
+
+    assert_eq!(
+        bytes_a[..split],
+        bytes_b[..split],
+        "everything before the signature (headers + payload) must be identical"
+    );
+    assert_ne!(
+        bytes_a[split..],
+        bytes_b[split..],
+        "the trailing signature bytes must differ due to the random PSS salt"
+    );
+    // The trailing region is exactly the signature, so the observed difference
+    // is the salt and nothing else.
+    assert_eq!(&bytes_a[split..], token_a.signature.as_slice());
+    assert_eq!(&bytes_b[split..], token_b.signature.as_slice());
+
+    token_a.verify(&public_key).expect("token_a should verify");
+    token_b.verify(&public_key).expect("token_b should verify");
+}
+
+#[test]
+fn test_es256_invalid_private_key_errors() {
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Es256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with an invalid ES256 key should yield InvalidKey"
+    );
+}
+
+/// A valid 1024-bit RSA key pair (PKCS#8 / SPKI DER, base64). Used only to
+/// confirm the PS256 minimum-key-size floor rejects undersized keys; 1024-bit
+/// RSA is below the 2048-bit minimum the crate enforces.
+const PS256_1024_PRIVATE_KEY_B64: &str = "MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKvHWxROqV0XWK/d7kjK0u0SZFP5mkAQlw+f+DSF2Lb0GR6nSpzPsgz72KcBnKTuIjKBjpCziE96F4kY60ads16ZdGnjpaZKk3ggWnMF0Q7njDUTedYcyZykGpJmYF/XhAsTn4yRnJBjc2mzHLeMYGHZgmwgf/AHC104uLFbShsbAgMBAAECgYEAhvsuPLTbLQVtcTSpS5XlTNkI8VvPs8vViDeh6FPMyWbiXk4CuVoThVRZGFKR7qAZSyq3BkmtMRa1a8ujBWhiSwgcelL2KSXiY60hYzlKkmBnYMwDpDfUxlfTgw2nC5ufb4HUd/W/p2NJdmGI0/5td+A9AhIpsg/7ZlHbK4QYisECQQDUuh2GTmiPl3c5Unmby3XXvnDVMNCTKtAk8mf9mNL8AIq2D9tqgX0PsVczKqzjtYVVlQD50lH95LKfTr3aoAQLAkEAzrjVqxNva8SMabIAvPXNLvk80IgnLKgLTFVbtOBHrUH3muoRKbFQvC0UwvqxkjNszpakX0eo3UTmIGQMdgQfMQJAK+udSuyHZBY2tGwV1ZfFZdzY+PtSJQBy5x3xYIecEBGgkgRmHfBMPOA1i8fk2ELTG59fCzVkXlJImuGsCyZ8jwJABXkBNxk5nunCKd4rhNUhDHhOstqX5ue//NJZri0t2Jlhe7lsoOTv1TuATDUk1FEGNWXpjhgwkUMMsJjVd55eUQJBALD636EfXmesRUVTo3dGBreONSD9kob2x7XckJFBBFAXGV2LLbEmjZTC6e9OVpPb5fEE0hMq029VrSwva5mqyuc=";
+const PS256_1024_PUBLIC_KEY_B64: &str = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCrx1sUTqldF1iv3e5IytLtEmRT+ZpAEJcPn/g0hdi29Bkep0qcz7IM+9inAZyk7iIygY6Qs4hPeheJGOtGnbNemXRp46WmSpN4IFpzBdEO54w1E3nWHMmcpBqSZmBf14QLE5+MkZyQY3Npsxy3jGBh2YJsIH/wBwtdOLixW0obGwIDAQAB";
+
+#[test]
+fn test_ps256_undersized_key_is_rejected_on_sign() {
+    use ct_codecs::{Base64, Decoder};
+    let small_key = Base64::decode_to_vec(PS256_1024_PRIVATE_KEY_B64, None)
+        .expect("valid 1024-bit private key");
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Ps256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(&small_key);
+    // The key is structurally valid DER, so the only reason to reject is the
+    // 2048-bit minimum modulus floor.
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with a 1024-bit RSA key should be rejected as too small"
+    );
+}
+
+#[test]
+fn test_ps256_undersized_key_is_rejected_on_verify() {
+    // A signature produced directly by the low-level helper would also be
+    // refused at sign time; verify must independently reject an undersized
+    // public key regardless of the signature bytes supplied.
+    use ct_codecs::{Base64, Decoder};
+    let small_pub =
+        Base64::decode_to_vec(PS256_1024_PUBLIC_KEY_B64, None).expect("valid 1024-bit public key");
+    // Signature length matches a 1024-bit modulus (128 bytes); contents are
+    // irrelevant because the size check fires before any PSS verification.
+    let result = crate::utils::verify_ps256(&small_pub, b"data", &[0u8; 128]);
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Verifying against a 1024-bit RSA key should be rejected as too small"
+    );
+}
+
+#[test]
+fn test_ps256_invalid_private_key_errors() {
+    let result = TokenBuilder::new()
+        .algorithm(Algorithm::Ps256)
+        .registered_claims(RegisteredClaims::new().with_issuer("issuer"))
+        .sign(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Signing with an invalid PS256 key should yield InvalidKey"
+    );
+}
+
+#[test]
+fn test_es256_invalid_public_key_errors() {
+    let (private_key, _public_key) = es256_keys();
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    let result = token.verify(b"not-a-valid-der-key");
+    assert!(
+        matches!(result, Err(crate::error::Error::InvalidKey(_))),
+        "Verifying with an invalid ES256 public key should yield InvalidKey"
+    );
+}
+
+#[test]
+fn test_es256_signatures_are_low_s() {
+    // Every signature this crate emits must be in canonical low-S form so the
+    // signature bytes are a stable identity for a token (no malleable twin).
+    use p256::ecdsa::Signature;
+
+    let (private_key, _public_key) = es256_keys();
+    // Sign several distinct messages; RFC 6979 makes signing deterministic, so
+    // varying the input is what exercises different (r, s) pairs.
+    for i in 0..32u8 {
+        let sig_bytes =
+            crate::utils::compute_es256(&private_key, &[i, i.wrapping_mul(7), 0xAB]).expect("sign");
+        let sig = Signature::from_slice(&sig_bytes).expect("64-byte signature");
+        assert!(
+            sig.normalize_s().is_none(),
+            "compute_es256 must emit low-S signatures (iteration {i})"
+        );
+    }
+}
+
+#[test]
+fn test_es256_high_s_signature_is_rejected() {
+    // ECDSA is malleable: given a valid (r, s) signature, (r, n - s) is an
+    // equally valid signature over the same message. A high-S twin must be
+    // rejected so the accepted signature is canonical and cannot be duplicated
+    // by a third party without the private key.
+    use p256::ecdsa::Signature;
+
+    let (private_key, public_key) = es256_keys();
+    let data = b"es256 malleability check";
+
+    let low_s_bytes = crate::utils::compute_es256(&private_key, data).expect("sign");
+    // Sanity: the freshly produced signature verifies and is low-S.
+    crate::utils::verify_es256(&public_key, data, &low_s_bytes)
+        .expect("canonical low-S signature should verify");
+
+    // Construct the high-S twin (r, n - s) by negating the s scalar.
+    let low_s = Signature::from_slice(&low_s_bytes).expect("64-byte signature");
+    let (r, s) = low_s.split_scalars();
+    let high_s = Signature::from_scalars(r, -s).expect("non-zero scalars");
+    // The twin really is the high-S form (normalize_s would flip it back).
+    assert!(
+        high_s.normalize_s().is_some(),
+        "negated-s signature should be high-S"
+    );
+    let high_s_bytes = high_s.to_bytes().to_vec();
+    assert_ne!(
+        high_s_bytes, low_s_bytes,
+        "the malleable twin must differ from the canonical signature"
+    );
+
+    // The high-S twin is a mathematically valid ECDSA signature, but our
+    // verifier must reject it as non-canonical.
+    assert!(
+        matches!(
+            crate::utils::verify_es256(&public_key, data, &high_s_bytes),
+            Err(crate::error::Error::SignatureVerification)
+        ),
+        "high-S (malleable) signature must be rejected"
+    );
+}
+
+/// Regression test for the COSE protected-header interop bug.
+///
+/// COSE signs the *exact* encoded `protected` bstr, not a re-encoding of the
+/// decoded header map. This test mints an "external" ES256 token whose
+/// protected header encodes the `alg` value (-7) in the valid-but-non-canonical
+/// 2-byte form (`0x38 0x06`) rather than the 1-byte form (`0x26`) this crate's
+/// encoder emits. Verification must reproduce the original bytes; if it
+/// re-encodes the header map instead, the signed input differs and a valid
+/// token is rejected.
+#[test]
+fn test_es256_verifies_noncanonical_protected_header() {
+    let (private_key, public_key) = es256_keys();
+
+    // Protected header map {1: -7} with -7 encoded as the non-canonical
+    // 2-byte negative int (0x38 0x06). Canonical encoding would be `a1 01 26`.
+    let protected: &[u8] = &[0xa1, 0x01, 0x38, 0x06];
+    // Payload: an empty claims map (`a0`). Its contents are irrelevant to the
+    // signed-bytes question; only the protected header encoding matters here.
+    let payload: &[u8] = &[0xa0];
+
+    // Build the COSE Sig_structure exactly as sign1_input() does, but over the
+    // non-canonical protected bytes, then sign it.
+    let mut sig_structure = vec![0x84]; // array(4)
+    sig_structure.push(0x6a); // text(10)
+    sig_structure.extend_from_slice(b"Signature1");
+    sig_structure.push(0x40 | protected.len() as u8); // bstr(protected.len())
+    sig_structure.extend_from_slice(protected);
+    sig_structure.push(0x40); // bstr(0) external_aad
+    sig_structure.push(0x40 | payload.len() as u8); // bstr(payload.len())
+    sig_structure.extend_from_slice(payload);
+
+    let signature = crate::utils::compute_es256(&private_key, &sig_structure)
+        .expect("compute_es256 over non-canonical structure");
+    assert_eq!(signature.len(), 64);
+
+    // Assemble the full tagged COSE_Sign1 token with the same protected bytes.
+    let mut token_bytes = vec![0xd8, 0x3d, 0xd2]; // tag 61 (CWT), tag 18 (COSE_Sign1)
+    token_bytes.push(0x84); // array(4)
+    token_bytes.push(0x40 | protected.len() as u8); // protected bstr
+    token_bytes.extend_from_slice(protected);
+    token_bytes.push(0xa0); // unprotected: empty map
+    token_bytes.push(0x40 | payload.len() as u8); // payload bstr
+    token_bytes.extend_from_slice(payload);
+    token_bytes.push(0x58); // bstr, 1-byte length follows
+    token_bytes.push(64);
+    token_bytes.extend_from_slice(&signature);
+
+    let decoded = Token::from_bytes(&token_bytes).expect("decode non-canonical token");
+    assert_eq!(decoded.header.algorithm(), Some(Algorithm::Es256));
+    decoded
+        .verify(&public_key)
+        .expect("non-canonical protected header should still verify");
+
+    // Re-encoding a decoded token must be byte-faithful to the producer's
+    // encoding (RFC 9052 §4.4), so the non-canonical protected bytes survive a
+    // round-trip and the token still verifies. A canonicalizing re-encode would
+    // turn `a1 01 38 06` back into `a1 01 26` and break the signature.
+    let reencoded = decoded.to_bytes().expect("re-encode non-canonical token");
+    assert_eq!(
+        reencoded, token_bytes,
+        "to_bytes() must preserve the original protected header bytes"
+    );
+    Token::from_bytes(&reencoded)
+        .expect("decode round-tripped token")
+        .verify(&public_key)
+        .expect("round-tripped token should still verify");
+}
+
+#[test]
+fn test_algorithm_identifier_roundtrip() {
+    for alg in [Algorithm::HmacSha256, Algorithm::Es256, Algorithm::Ps256] {
+        let id = alg.identifier();
+        assert_eq!(Algorithm::from_identifier(id), Some(alg));
+    }
+    assert_eq!(Algorithm::Es256.identifier(), -7);
+    assert_eq!(Algorithm::Ps256.identifier(), -37);
+    assert!(!Algorithm::Es256.is_mac());
+    assert!(!Algorithm::Ps256.is_mac());
+    assert!(Algorithm::HmacSha256.is_mac());
+}
+
+#[test]
+fn test_algorithm_class_and_context() {
+    // MAC algorithms map to COSE_Mac0 / "MAC0"; signature algorithms map to
+    // COSE_Sign1 / "Signature1" (RFC 9052 §4.4, §6.3).
+    assert_eq!(Algorithm::HmacSha256.class(), AlgorithmClass::Mac);
+    assert_eq!(Algorithm::Es256.class(), AlgorithmClass::Signature);
+    assert_eq!(Algorithm::Ps256.class(), AlgorithmClass::Signature);
+
+    assert_eq!(AlgorithmClass::Mac.context(), "MAC0");
+    assert_eq!(AlgorithmClass::Signature.context(), "Signature1");
+
+    // is_mac() is defined in terms of the class, so they must agree.
+    for alg in [Algorithm::HmacSha256, Algorithm::Es256, Algorithm::Ps256] {
+        assert_eq!(alg.is_mac(), alg.class() == AlgorithmClass::Mac);
+    }
+}
+
+#[test]
+fn test_to_bytes_without_algorithm_errors() {
+    // A hand-built token with no algorithm in its protected header has no valid
+    // COSE structure and cannot be verified, so to_bytes() must reject it rather
+    // than silently emit an untagged, unverifiable token (symmetric with verify
+    // / sign, which both require an algorithm).
+    use crate::header::Header;
+    let token = Token::new(Header::new(), crate::claims::Claims::new(), Vec::new());
+    assert!(
+        matches!(token.to_bytes(), Err(crate::error::Error::InvalidFormat(_))),
+        "to_bytes() on a token with no algorithm should return InvalidFormat"
+    );
 }

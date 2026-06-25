@@ -1,10 +1,13 @@
 //! Token implementation for Common Access Token
 
-use crate::claims::{Claims, RegisteredClaims};
+use crate::claims::{Claims, ClaimsMap, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
-use crate::header::{Algorithm, CborValue, Header, HeaderMap, KeyId};
-use crate::utils::{compute_hmac_sha256, current_timestamp, verify_hmac_sha256};
+use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
+use crate::utils::{
+    compute_es256, compute_hmac_sha256, compute_ps256, current_timestamp, verify_es256,
+    verify_hmac_sha256, verify_ps256,
+};
 use crate::FingerprintType;
 use minicbor::{Decoder, Encoder};
 use std::collections::BTreeMap;
@@ -22,6 +25,25 @@ pub struct Token {
     pub signature: Vec<u8>,
     /// Original payload bytes (for verification)
     original_payload_bytes: Option<Vec<u8>>,
+    /// Original protected header bytes (for verification)
+    ///
+    /// COSE signs/MACs the exact encoded `protected` bstr, not a re-encoding of
+    /// the decoded header map. Preserving the original bytes from `from_bytes`
+    /// lets verification reproduce the signed input even when the producer's
+    /// CBOR encoding (map ordering, integer width, etc.) differs from ours.
+    original_protected_bytes: Option<Vec<u8>>,
+    /// Baseline claims projection captured at decode time (for mutation detection)
+    ///
+    /// This is `Claims::from_map(decoded).to_map()` — the round-tripped
+    /// projection of the payload as it was when decoded. We reuse the producer's
+    /// exact `original_payload_bytes` only when the *current* claims project to
+    /// this same baseline; a difference means the public `claims` field was
+    /// mutated after decoding. Comparing projection-to-projection (rather than
+    /// the current projection to the full original map) makes the check robust
+    /// to claims the `Claims` struct cannot represent losslessly (e.g. an `aud`
+    /// encoded as a CBOR array): both sides drop the same information, so an
+    /// unmutated token still matches and keeps its byte-faithful signed bytes.
+    baseline_payload_projection: Option<ClaimsMap>,
 }
 
 impl Token {
@@ -32,6 +54,8 @@ impl Token {
             claims,
             signature,
             original_payload_bytes: None,
+            original_protected_bytes: None,
+            baseline_payload_projection: None,
         }
     }
 
@@ -40,27 +64,45 @@ impl Token {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
 
-        // For HMAC algorithms, use COSE_Mac0 format with CWT tag
-        if let Some(Algorithm::HmacSha256) = self.header.algorithm() {
-            // Apply CWT tag (61)
-            enc.tag(minicbor::data::Tag::new(61))?;
-            // Apply COSE_Mac0 tag (17)
-            enc.tag(minicbor::data::Tag::new(17))?;
-        }
+        // Apply the CWT tag (61) followed by the COSE structure tag. The tag is
+        // selected by the algorithm's COSE class (RFC 9052 §8.1, §8.2): MAC
+        // algorithms use COSE_Mac0 (tag 17); signature algorithms use COSE_Sign1
+        // (tag 18).
+        //
+        // A token with no algorithm in its protected header has no valid COSE
+        // structure and cannot be verified (`verify` rejects it with
+        // `InvalidFormat`), so emitting one would silently produce an
+        // unverifiable token. That state is only reachable by hand-building a
+        // `Token` via `Token::new` without an algorithm; reject it here so the
+        // caller bug surfaces, symmetric with `verify`/`sign`.
+        let alg = self.header.algorithm().ok_or_else(|| {
+            Error::InvalidFormat("Missing algorithm in protected header".to_string())
+        })?;
+        // Apply CWT tag (61)
+        enc.tag(minicbor::data::Tag::new(61))?;
+        // The COSE structure tag is owned by the algorithm's class (see
+        // `AlgorithmClass::cbor_tag`), keeping it in sync with the matching
+        // context string used in the signed input.
+        enc.tag(minicbor::data::Tag::new(alg.class().cbor_tag()))?;
 
         // COSE structure array with 4 items
         enc.array(4)?;
 
-        // 1. Protected header (encoded as CBOR and then as bstr)
-        let protected_bytes = encode_map(&self.header.protected)?;
+        // 1. Protected header (encoded as CBOR and then as bstr).
+        // Reuse the original bytes for a decoded token so the re-encoding is
+        // byte-faithful to the producer's encoding (see `protected_bytes`).
+        let protected_bytes = self.protected_bytes()?;
         enc.bytes(&protected_bytes)?;
 
         // 2. Unprotected header
         encode_map_direct(&self.header.unprotected, &mut enc)?;
 
-        // 3. Payload (encoded as CBOR and then as bstr)
-        let claims_map = self.claims.to_map();
-        let claims_bytes = encode_map(&claims_map)?;
+        // 3. Payload (encoded as CBOR and then as bstr).
+        // Reuse the original bytes for a decoded token so the re-encoding is
+        // byte-faithful to the producer's encoding (see `get_payload_bytes`).
+        // This is the exact payload covered by the signature/MAC, so emitting
+        // a re-encoded payload would invalidate a decoded token's signature.
+        let claims_bytes = self.get_payload_bytes()?;
         enc.bytes(&claims_bytes)?;
 
         // 4. Signature/MAC
@@ -99,6 +141,7 @@ impl Token {
         // 1. Protected header
         let protected_bytes = dec.bytes()?;
         let protected = decode_map(protected_bytes)?;
+        let original_protected_bytes = protected_bytes.to_vec();
 
         // 2. Unprotected header
         let unprotected = decode_map_direct(&mut dec)?;
@@ -113,6 +156,10 @@ impl Token {
         let claims_bytes = dec.bytes()?;
         let claims_map = decode_map(claims_bytes)?;
         let claims = Claims::from_map(&claims_map);
+        // Baseline projection of the payload as decoded. `claims` is
+        // `Claims::from_map(&claims_map)`, so `claims.to_map()` is exactly the
+        // round-tripped projection used later to detect mutation.
+        let baseline_payload_projection = claims.to_map();
 
         // 4. Signature
         let signature = dec.bytes()?.to_vec();
@@ -122,14 +169,21 @@ impl Token {
             claims,
             signature,
             original_payload_bytes: Some(claims_bytes.to_vec()),
+            original_protected_bytes: Some(original_protected_bytes),
+            baseline_payload_projection: Some(baseline_payload_projection),
         })
     }
 
     /// Verify the token signature
     ///
-    /// This function supports both COSE_Sign1 and COSE_Mac0 structures.
-    /// It will first try to verify the signature using the COSE_Sign1 structure,
-    /// and if that fails, it will try the COSE_Mac0 structure.
+    /// The structure used depends on the algorithm in the protected header:
+    ///
+    /// - **HmacSha256** uses the COSE_Mac0 structure. For backward compatibility
+    ///   with tokens produced by other implementations, both the COSE_Sign1 and
+    ///   COSE_Mac0 inputs are tried.
+    /// - **Es256** and **Ps256** are asymmetric signature algorithms and use the
+    ///   COSE_Sign1 structure. For these, `key` must be the SPKI DER-encoded
+    ///   public key.
     pub fn verify(&self, key: &[u8]) -> Result<(), Error> {
         let alg = self.header.algorithm().ok_or_else(|| {
             Error::InvalidFormat("Missing algorithm in protected header".to_string())
@@ -148,6 +202,19 @@ impl Token {
                 // If COSE_Sign1 verification fails, try COSE_Mac0 structure
                 let mac0_input = self.mac0_input()?;
                 verify_hmac_sha256(key, &mac0_input, &self.signature)
+            }
+            // Es256 and Ps256 share the same COSE_Sign1 input but are kept as
+            // separate arms (rather than merged into `Es256 | Ps256` with a
+            // nested match) so each maps directly to its own verify primitive.
+            // The duplication is one line; a merged arm would re-introduce a
+            // nested `match alg` that is harder to read for no real savings.
+            Algorithm::Es256 => {
+                let sign1_input = self.sign1_input()?;
+                verify_es256(key, &sign1_input, &self.signature)
+            }
+            Algorithm::Ps256 => {
+                let sign1_input = self.sign1_input()?;
+                verify_ps256(key, &sign1_input, &self.signature)
             }
         }
     }
@@ -655,27 +722,84 @@ impl Token {
 
     // Note: signature_input method removed as we now use mac0_input for HMAC algorithms
 
-    /// Get the encoded payload bytes, using original bytes if available
-    fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
-        if let Some(ref original) = self.original_payload_bytes {
-            // Use original bytes for verification
-            Ok(original.clone())
-        } else {
-            // Encode claims for newly created tokens
-            let claims_map = self.claims.to_map();
-            encode_map(&claims_map)
+    /// Get the encoded payload bytes.
+    ///
+    /// For a token decoded via [`Self::from_bytes`] whose `claims` have not been
+    /// changed, the producer's exact original bytes are reused so the signed
+    /// `payload` bstr is byte-faithful (a re-encode can differ in map ordering,
+    /// integer width, etc. — see [`Self::protected_bytes`]).
+    ///
+    /// The `claims` field is public, so it may have been mutated after decoding.
+    /// The cached bytes are only reused when the current claims still project to
+    /// the baseline captured at decode time (see `baseline_payload_projection`);
+    /// otherwise the claims are re-encoded. This keeps `to_bytes()` from silently
+    /// emitting a token that carries the producer's original claims while the
+    /// caller believes it carries their mutated ones. A re-encoded payload no
+    /// longer matches the original signature/MAC, so such a token fails
+    /// verification rather than passing with the wrong claims.
+    ///
+    /// The comparison is projection-to-projection (current claims vs. the
+    /// decode-time projection) rather than current-claims vs. the full original
+    /// map, so it is robust to claims the `Claims` struct drops on decode (e.g.
+    /// an `aud` encoded as a CBOR array): both sides lose the same information,
+    /// so an unmutated token still matches and keeps its byte-faithful bytes.
+    ///
+    /// Crate-internal (`pub(crate)`) so tests can assert that two tokens with
+    /// identical claims produce identical signed payload bytes (e.g. that a PSS
+    /// signature difference comes solely from salt randomization), without
+    /// committing this to the public API surface.
+    pub(crate) fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
+        // Encoding is deferred to the fallback arm so the common
+        // decoded-and-unmutated path (e.g. during verify/to_bytes) avoids a
+        // wasted re-encode, matching the sibling `protected_bytes`.
+        match (
+            &self.original_payload_bytes,
+            &self.baseline_payload_projection,
+        ) {
+            (Some(original), Some(baseline)) if self.claims.to_map() == *baseline => {
+                Ok(original.clone())
+            }
+            _ => encode_map(&self.claims.to_map()),
         }
     }
 
-    /// Get the COSE_Sign1 signature input
-    fn sign1_input(&self) -> Result<Vec<u8>, Error> {
-        // Sig_structure = [
-        //   context : "Signature1",
-        //   protected : bstr .cbor header_map,
-        //   external_aad : bstr,
-        //   payload : bstr .cbor claims
-        // ]
+    /// Get the encoded protected header bytes.
+    ///
+    /// COSE signs the exact `protected` bstr that appears on the wire, so a
+    /// decoded token reuses the producer's original bytes rather than re-encode
+    /// the header map (which can differ in map ordering, integer width, etc.).
+    /// Newly built tokens have no original bytes and are encoded from the header
+    /// map.
+    ///
+    /// As with [`Self::get_payload_bytes`], the `header` field is public; the
+    /// cached bytes are only reused when they still describe the current
+    /// protected header, so a mutated header is re-encoded rather than silently
+    /// replaced by the producer's original bytes.
+    fn protected_bytes(&self) -> Result<Vec<u8>, Error> {
+        match self.original_protected_bytes {
+            Some(ref original) if protected_matches(original, &self.header.protected) => {
+                Ok(original.clone())
+            }
+            _ => encode_map(&self.header.protected),
+        }
+    }
 
+    /// Build the COSE signed/MACed input structure for the given context.
+    ///
+    /// Per RFC 9052, the `Sig_structure` for COSE_Sign1 (§4.4) and the
+    /// `MAC_structure` for COSE_Mac0 (§6.3) are the same array shape; they
+    /// differ only in the leading context string (`"Signature1"` vs `"MAC0"`).
+    /// `Sig_structure` also defines a `sign_protected` field, but it is omitted
+    /// for COSE_Sign1, so both structures are 4-element arrays:
+    ///
+    /// ```text
+    /// [ context, protected : bstr .cbor header_map, external_aad : bstr, payload : bstr .cbor claims ]
+    /// ```
+    ///
+    /// The protected header is the exact serialized `bstr` from the token
+    /// (RFC 9052 §4.4: re-encoding must be byte-identical), supplied by
+    /// [`Self::protected_bytes`]. `external_aad` is the empty byte string.
+    fn cose_input(&self, context: &str) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
 
@@ -683,10 +807,10 @@ impl Token {
         enc.array(4)?;
 
         // 1. Context
-        enc.str("Signature1")?;
+        enc.str(context)?;
 
         // 2. Protected header
-        let protected_bytes = encode_map(&self.header.protected)?;
+        let protected_bytes = self.protected_bytes()?;
         enc.bytes(&protected_bytes)?;
 
         // 3. External AAD (empty in our case)
@@ -699,36 +823,14 @@ impl Token {
         Ok(buf)
     }
 
-    /// Get the COSE_Mac0 signature input
+    /// Get the COSE_Sign1 signature input (`Sig_structure`, RFC 9052 §4.4).
+    fn sign1_input(&self) -> Result<Vec<u8>, Error> {
+        self.cose_input(AlgorithmClass::Signature.context())
+    }
+
+    /// Get the COSE_Mac0 MAC input (`MAC_structure`, RFC 9052 §6.3).
     fn mac0_input(&self) -> Result<Vec<u8>, Error> {
-        // Mac_structure = [
-        //   context : "MAC0",
-        //   protected : bstr .cbor header_map,
-        //   external_aad : bstr,
-        //   payload : bstr .cbor claims
-        // ]
-
-        let mut buf = Vec::new();
-        let mut enc = Encoder::new(&mut buf);
-
-        // Start array with 4 items
-        enc.array(4)?;
-
-        // 1. Context
-        enc.str("MAC0")?;
-
-        // 2. Protected header
-        let protected_bytes = encode_map(&self.header.protected)?;
-        enc.bytes(&protected_bytes)?;
-
-        // 3. External AAD (empty in our case)
-        enc.bytes(&[])?;
-
-        // 4. Payload
-        let claims_bytes = self.get_payload_bytes()?;
-        enc.bytes(&claims_bytes)?;
-
-        Ok(buf)
+        self.cose_input(AlgorithmClass::Mac.context())
     }
 
     // Convenience methods for common token operations
@@ -1366,6 +1468,12 @@ impl TokenBuilder {
     }
 
     /// Build and sign the token
+    ///
+    /// The `key` is interpreted according to the algorithm in the protected header:
+    ///
+    /// - **HmacSha256**: the raw symmetric MAC key bytes.
+    /// - **Es256**: a PKCS#8 DER-encoded P-256 private key.
+    /// - **Ps256**: a PKCS#8 DER-encoded RSA private key.
     pub fn sign(self, key: &[u8]) -> Result<Token, Error> {
         // Ensure we have an algorithm
         let alg = self.header.algorithm().ok_or_else(|| {
@@ -1378,15 +1486,32 @@ impl TokenBuilder {
             claims: self.claims,
             signature: Vec::new(),
             original_payload_bytes: None,
+            original_protected_bytes: None,
+            baseline_payload_projection: None,
         };
 
-        // Compute signature input based on algorithm
-        // HMAC algorithms use COSE_Mac0 structure, others use COSE_Sign1
+        // Compute signature input based on algorithm.
+        // HMAC (MAC) algorithms use the COSE_Mac0 structure; asymmetric signature
+        // algorithms use the COSE_Sign1 structure.
         let (_signature_input, signature) = match alg {
             Algorithm::HmacSha256 => {
                 let mac_input = token.mac0_input()?;
                 let mac = compute_hmac_sha256(key, &mac_input);
                 (mac_input, mac)
+            }
+            // Es256 and Ps256 share the COSE_Sign1 input but stay as separate
+            // arms (not `Es256 | Ps256` with a nested match) so each maps
+            // directly to its own signing primitive — the one duplicated line is
+            // clearer than a merged arm that re-introduces a nested `match alg`.
+            Algorithm::Es256 => {
+                let sign_input = token.sign1_input()?;
+                let sig = compute_es256(key, &sign_input)?;
+                (sign_input, sig)
+            }
+            Algorithm::Ps256 => {
+                let sign_input = token.sign1_input()?;
+                let sig = compute_ps256(key, &sign_input)?;
+                (sign_input, sig)
             }
         };
 
@@ -1396,11 +1521,33 @@ impl TokenBuilder {
             claims: token.claims,
             signature,
             original_payload_bytes: None,
+            original_protected_bytes: None,
+            baseline_payload_projection: None,
         })
     }
 }
 
 // Helper functions for CBOR encoding/decoding
+
+/// Whether the cached original protected-header `bytes` still describe
+/// `protected`.
+///
+/// Decodes the producer's original protected bstr and compares it, by logical
+/// content (the header map), against the token's current protected header. A
+/// mismatch means the public `header.protected` field was mutated after
+/// decoding, so the cached bytes must not be reused. Undecodable original bytes
+/// also count as a mismatch, falling back to a fresh encode.
+///
+/// Unlike the payload, the protected header round-trips through `HeaderMap`
+/// losslessly, so comparing against the decoded original map is safe here (it
+/// cannot misfire on an unmutated token the way a lossy `Claims` projection
+/// could — see [`Token::get_payload_bytes`]).
+fn protected_matches(bytes: &[u8], protected: &HeaderMap) -> bool {
+    match decode_map(bytes) {
+        Ok(decoded) => &decoded == protected,
+        Err(_) => false,
+    }
+}
 
 fn encode_map(map: &HeaderMap) -> Result<Vec<u8>, Error> {
     let mut buf = Vec::new();
