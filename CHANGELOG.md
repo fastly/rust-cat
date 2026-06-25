@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `COSE_Mac0` (tag 17) while asymmetric signature algorithms use `COSE_Sign1`
   (tag 18). `Token::from_bytes` accepts both tagged and untagged input.
 
+### Security
+
+- ES256 signatures are now produced in canonical "low-S" form, and `verify`
+  rejects high-S (non-canonical) ECDSA signatures. ECDSA signatures are
+  malleable — for a valid `(r, s)`, the pair `(r, n - s)` verifies over the same
+  message — so without this a third party could derive a second valid signature
+  for an unchanged token. Requiring low-S makes the signature bytes a stable
+  identity for a token.
+
 ## [0.2.7] - 2025-11-05
 
 ### Added

@@ -2000,6 +2000,68 @@ fn test_es256_invalid_public_key_errors() {
     );
 }
 
+#[test]
+fn test_es256_signatures_are_low_s() {
+    // Every signature this crate emits must be in canonical low-S form so the
+    // signature bytes are a stable identity for a token (no malleable twin).
+    use p256::ecdsa::Signature;
+
+    let (private_key, _public_key) = es256_keys();
+    // Sign several distinct messages; RFC 6979 makes signing deterministic, so
+    // varying the input is what exercises different (r, s) pairs.
+    for i in 0..32u8 {
+        let sig_bytes =
+            crate::utils::compute_es256(&private_key, &[i, i.wrapping_mul(7), 0xAB]).expect("sign");
+        let sig = Signature::from_slice(&sig_bytes).expect("64-byte signature");
+        assert!(
+            sig.normalize_s().is_none(),
+            "compute_es256 must emit low-S signatures (iteration {i})"
+        );
+    }
+}
+
+#[test]
+fn test_es256_high_s_signature_is_rejected() {
+    // ECDSA is malleable: given a valid (r, s) signature, (r, n - s) is an
+    // equally valid signature over the same message. A high-S twin must be
+    // rejected so the accepted signature is canonical and cannot be duplicated
+    // by a third party without the private key.
+    use p256::ecdsa::Signature;
+
+    let (private_key, public_key) = es256_keys();
+    let data = b"es256 malleability check";
+
+    let low_s_bytes = crate::utils::compute_es256(&private_key, data).expect("sign");
+    // Sanity: the freshly produced signature verifies and is low-S.
+    crate::utils::verify_es256(&public_key, data, &low_s_bytes)
+        .expect("canonical low-S signature should verify");
+
+    // Construct the high-S twin (r, n - s) by negating the s scalar.
+    let low_s = Signature::from_slice(&low_s_bytes).expect("64-byte signature");
+    let (r, s) = low_s.split_scalars();
+    let high_s = Signature::from_scalars(r, -s).expect("non-zero scalars");
+    // The twin really is the high-S form (normalize_s would flip it back).
+    assert!(
+        high_s.normalize_s().is_some(),
+        "negated-s signature should be high-S"
+    );
+    let high_s_bytes = high_s.to_bytes().to_vec();
+    assert_ne!(
+        high_s_bytes, low_s_bytes,
+        "the malleable twin must differ from the canonical signature"
+    );
+
+    // The high-S twin is a mathematically valid ECDSA signature, but our
+    // verifier must reject it as non-canonical.
+    assert!(
+        matches!(
+            crate::utils::verify_es256(&public_key, data, &high_s_bytes),
+            Err(crate::error::Error::SignatureVerification)
+        ),
+        "high-S (malleable) signature must be rejected"
+    );
+}
+
 /// Regression test for the COSE protected-header interop bug.
 ///
 /// COSE signs the *exact* encoded `protected` bstr, not a re-encoding of the
