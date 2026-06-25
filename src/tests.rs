@@ -630,6 +630,60 @@ fn test_decoded_token_reencodes_without_breaking_signature() {
 }
 
 #[test]
+fn test_mutated_claims_are_reflected_in_to_bytes() {
+    // The `claims` field is public, so a decoded token can be mutated before
+    // re-encoding. `to_bytes()` must reflect the mutation rather than silently
+    // emit the producer's original (cached) payload bytes. Without the cache
+    // validation in `get_payload_bytes`, this emits a token still carrying the
+    // original `iss`.
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let mut token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    assert_eq!(token.claims.registered.iss, Some("primevideo".to_string()));
+
+    // Mutate a claim, then re-encode and re-parse.
+    token.claims.registered.iss = Some("mutated-issuer".to_string());
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+    let reparsed = Token::from_bytes(&reencoded).expect("Failed to parse re-encoded token");
+
+    // The mutation must be reflected on the wire.
+    assert_eq!(
+        reparsed.claims.registered.iss,
+        Some("mutated-issuer".to_string()),
+        "to_bytes() must emit the mutated claims, not the cached original bytes"
+    );
+
+    // And because the payload changed, the original MAC no longer matches:
+    // the token must fail verification rather than pass with the wrong claims.
+    assert!(
+        reparsed.verify(b"testSecret").is_err(),
+        "A token whose claims were mutated after decode must not verify with the original MAC"
+    );
+}
+
+#[test]
+fn test_unmutated_decoded_token_reuses_original_bytes() {
+    // Counterpart to the mutation test: when the claims are *not* changed, the
+    // cache-validation path must still reuse the producer's exact original
+    // bytes so the round-trip stays byte-faithful (the non-canonical-encoding
+    // interop guarantee).
+    let token_b64 = "2D3RhEOhAQWhBEd0ZXN0S2lkWOCnAWpwcmltZXZpZGVvAngkNWI4ZWQ2YjItZmNhNC00ZWQ1LTkxNWYtNThjZTFiMGYzMDRiB1gkZjI0ZmIxMDctNDA0MS00MTkxLThkMDktOWMzMzZkNWVjNzAyBRpofDGABBpoirIAGQE4ogahAXgkNGFkZGQ5ZTctZTUzMS00NzIxLTlhNjctYjJlNzQ1OTIyMmJiBaECeCYvZTA1OS83ODExLzE2NDAvNDdlMS05OTMwLTJhNDM0MWVhOGIxMBkBQ6MAAgEZA4QEdVgtUFYtQ0ROLUFjY2Vzcy1Ub2tlblggdBNqM-3RwdEOuIZ2UoF-jDq3z7DvNcjUWSISjCiugR4";
+    let token_bytes =
+        Base64UrlSafeNoPadding::decode_to_vec(token_b64, None).expect("Failed to decode base64");
+
+    let token = Token::from_bytes(&token_bytes).expect("Failed to parse token");
+    let reencoded = token.to_bytes().expect("Failed to re-encode token");
+
+    // Byte-for-byte identical to the producer's original encoding.
+    assert_eq!(
+        reencoded, token_bytes,
+        "Unmutated decoded token must re-encode byte-faithfully"
+    );
+}
+
+#[test]
 fn test_created_token_format() {
     // Test that tokens created by this library have the correct format
     let key = b"testSecret";
@@ -1659,8 +1713,32 @@ fn test_ps256_signatures_are_randomized() {
     // yet both must verify.
     let (private_key, public_key) = ps256_keys();
 
-    let token_a = build_signed_token(Algorithm::Ps256, &private_key);
-    let token_b = build_signed_token(Algorithm::Ps256, &private_key);
+    // Build both tokens with identical, fixed claims (no calls to
+    // `current_timestamp()`) so the signed payload is byte-for-byte the same.
+    // The PSS salt is then the only source of entropy, so any difference in
+    // the signatures is attributable solely to salt randomization rather than
+    // to differing claims.
+    let build = || {
+        TokenBuilder::new()
+            .algorithm(Algorithm::Ps256)
+            .protected_key_id(KeyId::string("asym-key-1"))
+            .registered_claims(
+                RegisteredClaims::new()
+                    .with_issuer("issuer")
+                    .with_subject("subject")
+                    .with_audience("audience")
+                    .with_expiration(2_000_000_000)
+                    .with_not_before(1_000_000_000)
+                    .with_issued_at(1_000_000_000),
+            )
+            .custom_string(100, "custom-string-value")
+            .custom_int(102, 12345)
+            .sign(&private_key)
+            .expect("Failed to sign token")
+    };
+
+    let token_a = build();
+    let token_b = build();
 
     assert_ne!(
         token_a.signature, token_b.signature,
