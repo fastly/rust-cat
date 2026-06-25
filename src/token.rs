@@ -81,16 +81,23 @@ impl Token {
         // Apply the CWT tag (61) followed by the COSE structure tag. The tag is
         // selected by the algorithm's COSE class (RFC 9052 §8.1, §8.2): MAC
         // algorithms use COSE_Mac0 (tag 17); signature algorithms use COSE_Sign1
-        // (tag 18). If the header carries no algorithm, the bare COSE array is
-        // emitted untagged (`from_bytes` accepts both tagged and untagged input).
-        if let Some(alg) = self.header.algorithm() {
-            // Apply CWT tag (61)
-            enc.tag(minicbor::data::Tag::new(61))?;
-            // The COSE structure tag is owned by the algorithm's class (see
-            // `AlgorithmClass::cbor_tag`), keeping it in sync with the matching
-            // context string used in the signed input.
-            enc.tag(minicbor::data::Tag::new(alg.class().cbor_tag()))?;
-        }
+        // (tag 18).
+        //
+        // A token with no algorithm in its protected header has no valid COSE
+        // structure and cannot be verified (`verify` rejects it with
+        // `InvalidFormat`), so emitting one would silently produce an
+        // unverifiable token. That state is only reachable by hand-building a
+        // `Token` via `Token::new` without an algorithm; reject it here so the
+        // caller bug surfaces, symmetric with `verify`/`sign`.
+        let alg = self.header.algorithm().ok_or_else(|| {
+            Error::InvalidFormat("Missing algorithm in protected header".to_string())
+        })?;
+        // Apply CWT tag (61)
+        enc.tag(minicbor::data::Tag::new(61))?;
+        // The COSE structure tag is owned by the algorithm's class (see
+        // `AlgorithmClass::cbor_tag`), keeping it in sync with the matching
+        // context string used in the signed input.
+        enc.tag(minicbor::data::Tag::new(alg.class().cbor_tag()))?;
 
         // COSE structure array with 4 items
         enc.array(4)?;

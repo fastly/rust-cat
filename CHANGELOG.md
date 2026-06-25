@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tokens are tagged according to their algorithm: HMAC (MAC) algorithms use
   `COSE_Mac0` (tag 17) while asymmetric signature algorithms use `COSE_Sign1`
   (tag 18). `Token::from_bytes` accepts both tagged and untagged input.
+- `Token::to_bytes` now returns `Error::InvalidFormat` when the protected header
+  carries no algorithm, instead of emitting a bare untagged COSE array that the
+  crate's own `verify` would reject. This state is only reachable by manually
+  constructing a `Token` via `Token::new` without an algorithm.
 
 ### Security
 

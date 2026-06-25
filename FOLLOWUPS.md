@@ -19,10 +19,15 @@ classic JWT `alg`-confusion attack.
 
 - **Fix direction:** add an expected-algorithm / key-type to `verify` or
   `VerificationOptions` and reject MAC algorithms when an asymmetric key is
-  supplied.
-- **Why deferred:** the API change (and the design decision about where the
-  algorithm expectation should live) is a larger breaking change deserving its
-  own PR.
+  supplied. A minimal, additive (non-breaking) `verify_with_algorithm(key,
+  expected)` entrypoint could land first; threading the expectation through
+  `VerificationOptions` is the fuller, more ergonomic form.
+- **Why deferred:** designing where the algorithm expectation should live
+  (a new entrypoint vs. `VerificationOptions`, and the default-strictness
+  question) warrants its own PR rather than riding along here. Note this is
+  *not* blocked on a breaking release — 0.3.0 is already breaking, and an
+  additive entrypoint would not break callers — so it can be picked up
+  independently and soon. Reviewed and consciously deferred (PR #5).
 - Location: `src/token.rs` — `Token::verify`.
 
 ### COSE structure tag and `alg` are not cross-checked on decode
@@ -131,17 +136,6 @@ so a future "unification" doesn't reintroduce the signature-breaking regression
 the caches exist to prevent.
 
 - Location: `src/token.rs` — `get_payload_bytes` / `protected_bytes`.
-
-### `to_bytes` silently emits an untagged, unverifiable token when `alg` is `None`
-
-The `if let Some(alg)` branch emits a bare untagged COSE array when the header
-has no algorithm — which the crate's own `verify()` then rejects with
-`InvalidFormat("Missing algorithm")`. This state is only reachable via a
-hand-built `Token::new`, i.e. a caller bug. Returning `Err(InvalidFormat)` here
-would be symmetric with `verify()` / `sign()` and surface the bug instead of
-masking it.
-
-- Location: `src/token.rs` — `Token::to_bytes`.
 
 ### `Algorithm::is_mac` is redundant with `class()`
 

@@ -2204,3 +2204,17 @@ fn test_algorithm_class_and_context() {
         assert_eq!(alg.is_mac(), alg.class() == AlgorithmClass::Mac);
     }
 }
+
+#[test]
+fn test_to_bytes_without_algorithm_errors() {
+    // A hand-built token with no algorithm in its protected header has no valid
+    // COSE structure and cannot be verified, so to_bytes() must reject it rather
+    // than silently emit an untagged, unverifiable token (symmetric with verify
+    // / sign, which both require an algorithm).
+    use crate::header::Header;
+    let token = Token::new(Header::new(), crate::claims::Claims::new(), Vec::new());
+    assert!(
+        matches!(token.to_bytes(), Err(crate::error::Error::InvalidFormat(_))),
+        "to_bytes() on a token with no algorithm should return InvalidFormat"
+    );
+}
