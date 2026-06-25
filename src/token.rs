@@ -1,6 +1,6 @@
 //! Token implementation for Common Access Token
 
-use crate::claims::{Claims, RegisteredClaims};
+use crate::claims::{Claims, ClaimsMap, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
 use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
@@ -32,6 +32,18 @@ pub struct Token {
     /// lets verification reproduce the signed input even when the producer's
     /// CBOR encoding (map ordering, integer width, etc.) differs from ours.
     original_protected_bytes: Option<Vec<u8>>,
+    /// Baseline claims projection captured at decode time (for mutation detection)
+    ///
+    /// This is `Claims::from_map(decoded).to_map()` — the round-tripped
+    /// projection of the payload as it was when decoded. We reuse the producer's
+    /// exact `original_payload_bytes` only when the *current* claims project to
+    /// this same baseline; a difference means the public `claims` field was
+    /// mutated after decoding. Comparing projection-to-projection (rather than
+    /// the current projection to the full original map) makes the check robust
+    /// to claims the `Claims` struct cannot represent losslessly (e.g. an `aud`
+    /// encoded as a CBOR array): both sides drop the same information, so an
+    /// unmutated token still matches and keeps its byte-faithful signed bytes.
+    baseline_payload_projection: Option<ClaimsMap>,
 }
 
 impl Token {
@@ -43,6 +55,7 @@ impl Token {
             signature,
             original_payload_bytes: None,
             original_protected_bytes: None,
+            baseline_payload_projection: None,
         }
     }
 
@@ -151,6 +164,10 @@ impl Token {
         let claims_bytes = dec.bytes()?;
         let claims_map = decode_map(claims_bytes)?;
         let claims = Claims::from_map(&claims_map);
+        // Baseline projection of the payload as decoded. `claims` is
+        // `Claims::from_map(&claims_map)`, so `claims.to_map()` is exactly the
+        // round-tripped projection used later to detect mutation.
+        let baseline_payload_projection = claims.to_map();
 
         // 4. Signature
         let signature = dec.bytes()?.to_vec();
@@ -161,6 +178,7 @@ impl Token {
             signature,
             original_payload_bytes: Some(claims_bytes.to_vec()),
             original_protected_bytes: Some(original_protected_bytes),
+            baseline_payload_projection: Some(baseline_payload_projection),
         })
     }
 
@@ -715,19 +733,31 @@ impl Token {
     /// integer width, etc. — see [`Self::protected_bytes`]).
     ///
     /// The `claims` field is public, so it may have been mutated after decoding.
-    /// The cached bytes are only reused when they still describe the *current*
-    /// claims; otherwise the claims are re-encoded. This keeps `to_bytes()` from
-    /// silently emitting a token that carries the producer's original claims
-    /// while the caller believes it carries their mutated ones. A re-encoded
-    /// payload no longer matches the original signature/MAC, so such a token
-    /// fails verification rather than passing with the wrong claims.
+    /// The cached bytes are only reused when the current claims still project to
+    /// the baseline captured at decode time (see `baseline_payload_projection`);
+    /// otherwise the claims are re-encoded. This keeps `to_bytes()` from silently
+    /// emitting a token that carries the producer's original claims while the
+    /// caller believes it carries their mutated ones. A re-encoded payload no
+    /// longer matches the original signature/MAC, so such a token fails
+    /// verification rather than passing with the wrong claims.
+    ///
+    /// The comparison is projection-to-projection (current claims vs. the
+    /// decode-time projection) rather than current-claims vs. the full original
+    /// map, so it is robust to claims the `Claims` struct drops on decode (e.g.
+    /// an `aud` encoded as a CBOR array): both sides lose the same information,
+    /// so an unmutated token still matches and keeps its byte-faithful bytes.
     fn get_payload_bytes(&self) -> Result<Vec<u8>, Error> {
-        let claims_bytes = encode_map(&self.claims.to_map())?;
-        match self.original_payload_bytes {
-            // Reuse the producer's exact bytes only when they decode to the same
-            // claims the token currently holds.
-            Some(ref original) if payload_matches(original, &self.claims) => Ok(original.clone()),
-            _ => Ok(claims_bytes),
+        // Encoding is deferred to the fallback arm so the common
+        // decoded-and-unmutated path (e.g. during verify/to_bytes) avoids a
+        // wasted re-encode, matching the sibling `protected_bytes`.
+        match (
+            &self.original_payload_bytes,
+            &self.baseline_payload_projection,
+        ) {
+            (Some(original), Some(baseline)) if self.claims.to_map() == *baseline => {
+                Ok(original.clone())
+            }
+            _ => encode_map(&self.claims.to_map()),
         }
     }
 
@@ -1455,6 +1485,7 @@ impl TokenBuilder {
             signature: Vec::new(),
             original_payload_bytes: None,
             original_protected_bytes: None,
+            baseline_payload_projection: None,
         };
 
         // Compute signature input based on algorithm.
@@ -1485,28 +1516,26 @@ impl TokenBuilder {
             signature,
             original_payload_bytes: None,
             original_protected_bytes: None,
+            baseline_payload_projection: None,
         })
     }
 }
 
 // Helper functions for CBOR encoding/decoding
 
-/// Whether the cached original payload `bytes` still describe `claims`.
-///
-/// Decodes the producer's original `payload` bstr and compares it, by logical
-/// content (the claims map), against the token's current claims. A mismatch
-/// means the public `claims` field was mutated after decoding, so the cached
-/// bytes must not be reused. Undecodable original bytes also count as a
-/// mismatch, falling back to a fresh encode.
-fn payload_matches(bytes: &[u8], claims: &Claims) -> bool {
-    match decode_map(bytes) {
-        Ok(decoded) => decoded == claims.to_map(),
-        Err(_) => false,
-    }
-}
-
 /// Whether the cached original protected-header `bytes` still describe
-/// `protected`. See [`payload_matches`]; same logic for the protected header.
+/// `protected`.
+///
+/// Decodes the producer's original protected bstr and compares it, by logical
+/// content (the header map), against the token's current protected header. A
+/// mismatch means the public `header.protected` field was mutated after
+/// decoding, so the cached bytes must not be reused. Undecodable original bytes
+/// also count as a mismatch, falling back to a fresh encode.
+///
+/// Unlike the payload, the protected header round-trips through `HeaderMap`
+/// losslessly, so comparing against the decoded original map is safe here (it
+/// cannot misfire on an unmutated token the way a lossy `Claims` projection
+/// could — see [`Token::get_payload_bytes`]).
 fn protected_matches(bytes: &[u8], protected: &HeaderMap) -> bool {
     match decode_map(bytes) {
         Ok(decoded) => &decoded == protected,

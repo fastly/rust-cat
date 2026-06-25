@@ -683,6 +683,172 @@ fn test_unmutated_decoded_token_reuses_original_bytes() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Lossy-claim round-trip regression tests.
+//
+// `Claims` cannot represent every spec-valid CWT payload: a registered claim
+// carried with an unexpected CBOR type is dropped by `Claims::from_map`. The
+// canonical case is `aud` (key 3) encoded as a CBOR *array* of audiences, which
+// RFC 8392 / RFC 7519 permit but `RegisteredClaims.aud: Option<String>` cannot
+// hold. A `cti` (key 7) encoded as text is a second, non-conformant-producer
+// trigger.
+//
+// These tokens must still verify (their signed payload bytes are preserved
+// byte-faithfully) and round-trip without the dropped claim breaking the
+// signature. They regress if `to_bytes`/`verify` re-encode the lossy `Claims`
+// projection instead of reusing the producer's original payload bytes.
+// ---------------------------------------------------------------------------
+
+/// Append a CBOR byte string (`bstr`) header + contents for `data`.
+fn push_bstr(buf: &mut Vec<u8>, data: &[u8]) {
+    let len = data.len();
+    if len < 24 {
+        buf.push(0x40 | len as u8);
+    } else if len < 256 {
+        buf.push(0x58);
+        buf.push(len as u8);
+    } else {
+        buf.push(0x59);
+        buf.push((len >> 8) as u8);
+        buf.push((len & 0xff) as u8);
+    }
+    buf.extend_from_slice(data);
+}
+
+/// Append a CBOR text string for `s` (only short strings, len < 24).
+fn push_text(buf: &mut Vec<u8>, s: &str) {
+    let b = s.as_bytes();
+    assert!(b.len() < 24, "test helper only handles short text");
+    buf.push(0x60 | b.len() as u8);
+    buf.extend_from_slice(b);
+}
+
+/// Hand-build a tagged COSE_Mac0 (CWT) token from raw protected/payload bstr
+/// contents, MACed with HMAC-SHA256 over the `MAC_structure` using `key`.
+fn build_mac0_token_bytes(protected: &[u8], payload: &[u8], key: &[u8]) -> Vec<u8> {
+    // MAC_structure = ["MAC0", protected : bstr, external_aad : bstr(empty), payload : bstr]
+    let mut mac_structure = vec![0x84]; // array(4)
+    push_text(&mut mac_structure, "MAC0");
+    push_bstr(&mut mac_structure, protected);
+    push_bstr(&mut mac_structure, &[]); // external_aad
+    push_bstr(&mut mac_structure, payload);
+
+    let mac = crate::utils::compute_hmac_sha256(key, &mac_structure);
+
+    // Tagged COSE_Mac0: tag 61 (CWT), tag 17 (COSE_Mac0), array(4).
+    let mut token = vec![0xd8, 0x3d, 0xd1, 0x84];
+    push_bstr(&mut token, protected); // 1. protected header
+    token.push(0xa0); // 2. unprotected: empty map
+    push_bstr(&mut token, payload); // 3. payload
+    push_bstr(&mut token, &mac); // 4. MAC
+    token
+}
+
+#[test]
+fn test_aud_as_array_verifies_and_roundtrips() {
+    // A spec-valid CWT whose `aud` (key 3) is a CBOR array of audiences — a
+    // shape `RegisteredClaims.aud: Option<String>` cannot represent, so the
+    // claim is dropped from the decoded `Claims`. The producer's signed payload
+    // bytes must still be preserved so the token verifies and round-trips.
+    let key = b"testSecret";
+
+    // Protected header { 1 (alg): 5 (HS256) }.
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+
+    // Payload { 3 (aud): ["aud-one", "aud-two"] }.
+    let mut payload = vec![0xa1, 0x03, 0x82]; // map(1), key 3, array(2)
+    push_text(&mut payload, "aud-one");
+    push_text(&mut payload, "aud-two");
+
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let token = Token::from_bytes(&token_bytes).expect("decode aud-as-array token");
+
+    // The lossy drop is real and documented: the typed accessor sees no `aud`.
+    assert_eq!(
+        token.claims.registered.aud, None,
+        "array-valued aud cannot be represented by Option<String> and is dropped"
+    );
+
+    // Regression: an unmutated token must still verify against the original key.
+    assert!(
+        token.verify(key).is_ok(),
+        "unmutated aud-as-array token must verify (byte-faithful payload reuse)"
+    );
+
+    // And it must re-encode byte-for-byte (the dropped claim survives on the wire).
+    let reencoded = token.to_bytes().expect("re-encode aud-as-array token");
+    assert_eq!(
+        reencoded, token_bytes,
+        "unmutated lossy token must re-encode byte-faithfully, preserving aud"
+    );
+    Token::from_bytes(&reencoded)
+        .expect("decode round-tripped token")
+        .verify(key)
+        .expect("round-tripped aud-as-array token should still verify");
+}
+
+#[test]
+fn test_aud_as_array_mutation_is_reflected() {
+    // Counterpart: mutating a claim on a lossy token must still be reflected on
+    // the wire (the cache must not silently re-emit the producer's bytes), and
+    // the mutated payload must then fail verification against the original MAC.
+    let key = b"testSecret";
+
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+    let mut payload = vec![0xa1, 0x03, 0x82];
+    push_text(&mut payload, "aud-one");
+    push_text(&mut payload, "aud-two");
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let mut token = Token::from_bytes(&token_bytes).expect("decode aud-as-array token");
+
+    // Set a (representable) issuer claim that was not present in the original.
+    token.claims.registered.iss = Some("mutated-issuer".to_string());
+
+    let reencoded = token.to_bytes().expect("re-encode mutated token");
+    let reparsed = Token::from_bytes(&reencoded).expect("decode mutated token");
+
+    assert_eq!(
+        reparsed.claims.registered.iss,
+        Some("mutated-issuer".to_string()),
+        "mutation on a lossy token must be reflected on the wire"
+    );
+    assert!(
+        reparsed.verify(key).is_err(),
+        "a mutated payload must not verify against the original MAC"
+    );
+}
+
+#[test]
+fn test_cti_as_text_verifies_and_roundtrips() {
+    // A second lossy trigger: `cti` (key 7) carried as text rather than bytes.
+    // `RegisteredClaims::from_map` only accepts `cti` as bytes, so it is dropped,
+    // yet the token must still verify and round-trip byte-faithfully.
+    let key = b"testSecret";
+
+    let protected: &[u8] = &[0xa1, 0x01, 0x05];
+    // Payload { 7 (cti): "cti-as-text" }.
+    let mut payload = vec![0xa1, 0x07];
+    push_text(&mut payload, "cti-as-text");
+    let token_bytes = build_mac0_token_bytes(protected, &payload, key);
+
+    let token = Token::from_bytes(&token_bytes).expect("decode cti-as-text token");
+    assert_eq!(
+        token.claims.registered.cti, None,
+        "text-valued cti cannot be represented as bytes and is dropped"
+    );
+    assert!(
+        token.verify(key).is_ok(),
+        "unmutated cti-as-text token must verify"
+    );
+    assert_eq!(
+        token.to_bytes().expect("re-encode cti-as-text token"),
+        token_bytes,
+        "unmutated lossy token must re-encode byte-faithfully"
+    );
+}
+
 #[test]
 fn test_created_token_format() {
     // Test that tokens created by this library have the correct format
