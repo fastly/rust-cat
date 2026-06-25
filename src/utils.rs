@@ -23,7 +23,7 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(
 ///
 /// `key` must be a PKCS#8 DER-encoded P-256 private key. The returned signature
 /// is the fixed-length 64-byte COSE representation (`r || s`), as required by the
-/// COSE specification (RFC 8152 §8.1).
+/// COSE specification (RFC 9053 §2.1).
 pub fn compute_es256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     use p256::ecdsa::{signature::Signer, Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
