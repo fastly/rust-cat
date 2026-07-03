@@ -141,6 +141,55 @@ impl Algorithm {
     }
 }
 
+/// A typed verification key, used by [`crate::token::Token::verify_with_key`].
+///
+/// Each variant carries the key material *and* the algorithm it is valid for.
+/// Because the key's type is the algorithm, the token's self-declared `alg`
+/// header cannot steer verification to a different cryptographic primitive:
+/// `verify_with_key` rejects any token whose header algorithm does not match
+/// the key's algorithm before running any cryptography.
+///
+/// This prevents algorithm-confusion forgery. For example, an attacker who
+/// crafts a token with `alg = HmacSha256` and a MAC computed over the (public)
+/// ES256 verification key cannot have it accepted by a verifier that supplies a
+/// [`VerifyingKey::Es256`] key, because the algorithms do not match.
+///
+/// # Example
+///
+/// ```
+/// use common_access_token::VerifyingKey;
+///
+/// let secret = b"my-secret-key";
+/// let key = VerifyingKey::HmacSha256(secret);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub enum VerifyingKey<'a> {
+    /// HMAC-SHA256 shared secret, as raw key bytes (COSE_Mac0, alg 5).
+    HmacSha256(&'a [u8]),
+    /// ES256 public key, as SPKI DER (COSE_Sign1, alg -7).
+    Es256(&'a [u8]),
+    /// PS256 public key, as SPKI DER (COSE_Sign1, alg -37).
+    Ps256(&'a [u8]),
+}
+
+impl VerifyingKey<'_> {
+    /// The algorithm this key is valid for.
+    pub fn algorithm(&self) -> Algorithm {
+        match self {
+            VerifyingKey::HmacSha256(_) => Algorithm::HmacSha256,
+            VerifyingKey::Es256(_) => Algorithm::Es256,
+            VerifyingKey::Ps256(_) => Algorithm::Ps256,
+        }
+    }
+
+    /// The raw key material.
+    pub fn key_bytes(&self) -> &[u8] {
+        match self {
+            VerifyingKey::HmacSha256(k) | VerifyingKey::Es256(k) | VerifyingKey::Ps256(k) => k,
+        }
+    }
+}
+
 /// Key identifier that can be either a binary or string value.
 ///
 /// The key identifier (kid) is used to indicate which key was used to secure the token.
