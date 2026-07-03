@@ -28,3 +28,11 @@ rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
 # RNG for PSS salt generation (WASM-friendly via getrandom)
 rand_core = { version = "0.6", features = ["getrandom"] }
+
+[dev-dependencies]
+# Statistical benchmarking harness (`cargo bench`).
+criterion = "0.5"
+
+[[bench]]
+name = "cat"
+harness = false
