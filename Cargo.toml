@@ -1,6 +1,6 @@
 [package]
 name = "common-access-token"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Common Access Token (CAT) creation and verification for HTTP authorization using CBOR, COSE signatures, and CWT claims."
 authors = ["Fastly Inc."]
@@ -14,13 +14,13 @@ categories = ["authentication", "cryptography", "web-programming"]
 rust-version = "1.88.0"
 
 [dependencies]
-minicbor = { version = "2.1.3", features = ["derive", "std"] }
-hmac-sha256 = "1.1.12"
-hmac-sha512 = "1.1.7"
+minicbor = { version = "2.3.0", features = ["derive", "std"] }
+hmac-sha256 = "1.1.14"
+hmac-sha512 = "1.1.12"
 thiserror = "2"
-ct-codecs = "1.1.6"
-url = "2.5.2"
-regex = "1.9.6"
+ct-codecs = "1.1.7"
+url = "2.5.8"
+regex = "1.13.1"
 # ES256 (ECDSA P-256 + SHA-256, COSE alg -7)
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 # PS256 (RSASSA-PSS + SHA-256, COSE alg -37)
