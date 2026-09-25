@@ -2,14 +2,14 @@
 name = "common-access-token"
 version = "0.3.0"
 edition = "2021"
-description = "Implementation of the Common Access Token (CAT) specification"
+description = "Common Access Token (CAT) creation and verification for HTTP authorization using CBOR, COSE signatures, and CWT claims."
 authors = ["Fastly Inc."]
 license = "MIT"
 documentation = "https://docs.rs/common-access-token"
 homepage = "https://github.com/fastly/rust-cat"
 repository = "https://github.com/fastly/rust-cat"
 readme = "README.md"
-keywords = ["token", "authentication", "authorization", "cbor", "cose"]
+keywords = ["cat", "cwt", "cose", "cbor", "authorization"]
 categories = ["authentication", "cryptography", "web-programming"]
 rust-version = "1.88.0"
 
