@@ -81,6 +81,48 @@ pub mod match_types {
     pub const SHA512_256: i32 = -2;
 }
 
+/// MoQ Transport claim keys (draft-ietf-moq-c4m)
+///
+/// These keys are **provisional**: IANA has not yet assigned them, and the
+/// values are taken from the draft's test vectors. They may change before the
+/// draft is published.
+pub mod moqt_keys {
+    /// MoQ Transport scope (moqt) claim key
+    pub const MOQT: i32 = 327;
+    /// MoQ Transport revalidation interval (moqt-reval) claim key
+    pub const MOQT_REVAL: i32 = 328;
+}
+
+/// MoQ Transport action codes for the moqt claim (draft-ietf-moq-c4m, Table 1)
+pub mod moqt_actions {
+    /// CLIENT_SETUP
+    pub const CLIENT_SETUP: i64 = 0;
+    /// SERVER_SETUP
+    pub const SERVER_SETUP: i64 = 1;
+    /// PUBLISH_NAMESPACE
+    pub const PUBLISH_NAMESPACE: i64 = 2;
+    /// SUBSCRIBE_NAMESPACE
+    pub const SUBSCRIBE_NAMESPACE: i64 = 3;
+    /// SUBSCRIBE
+    pub const SUBSCRIBE: i64 = 4;
+    /// REQUEST_UPDATE
+    pub const REQUEST_UPDATE: i64 = 5;
+    /// PUBLISH
+    pub const PUBLISH: i64 = 6;
+    /// FETCH
+    pub const FETCH: i64 = 7;
+    /// TRACK_STATUS
+    pub const TRACK_STATUS: i64 = 8;
+}
+
+/// Binary match types for the moqt claim (a bare byte string is an exact match)
+pub mod moqt_match_types {
+    /// Prefix match
+    pub const PREFIX: i64 = 1;
+    /// Suffix match
+    pub const SUFFIX: i64 = 2;
+}
+
 /// Renewal types for CATR claim
 pub mod renewal_types {
     /// Automatic renewal

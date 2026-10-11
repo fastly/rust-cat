@@ -14,6 +14,8 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::Path;
 
+use crate::moqt::{parse_moqt_reval, MoqtClaim, MoqtRequest, MoqtRevalidation};
+
 /// Common Access Token structure
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -282,7 +284,44 @@ impl Token {
             self.verify_cattprint_claim(options)?;
         }
 
+        if options.verify_moqt {
+            self.verify_moqt_claims(options)?;
+        }
+
         Ok(())
+    }
+
+    /// Verify the MoQ Transport claims (moqt and moqt-reval) against the
+    /// provided request and revalidation capability
+    fn verify_moqt_claims(&self, options: &VerificationOptions) -> Result<(), Error> {
+        let request = options.moqt_request.as_ref().ok_or_else(|| {
+            Error::InvalidClaimValue("No MoQ request provided for moqt verification".to_string())
+        })?;
+
+        if let Some(reval) = self.moqt_reval()? {
+            match options.moqt_revalidation {
+                MoqtRevalidation::Unsupported => {
+                    return Err(Error::MoqtRevalidationUnsupported(format!(
+                        "token requires revalidation every {reval}s but this recipient cannot revalidate"
+                    )))
+                }
+                MoqtRevalidation::MinInterval(min) if reval < min as f64 => {
+                    return Err(Error::MoqtRevalidationUnsupported(format!(
+                        "token requires revalidation every {reval}s, shorter than the supported minimum of {min}s"
+                    )))
+                }
+                MoqtRevalidation::MinInterval(_) => {}
+            }
+        }
+
+        match self.moqt_claim()? {
+            Some(claim) if claim.permits(request) => Ok(()),
+            Some(_) => Err(Error::MoqtNotAuthorized(format!(
+                "no moqt scope permits {request}"
+            ))),
+            None if options.require_moqt => Err(Error::MissingClaim("moqt".to_string())),
+            None => Ok(()),
+        }
     }
 
     /// Verify the CATU (URI) claim against the provided URI
@@ -1128,6 +1167,37 @@ impl Token {
     pub fn has_custom_claim(&self, key: i32) -> bool {
         self.claims.custom.contains_key(&key)
     }
+
+    /// Parse the MoQ Transport scope (moqt) claim, if present
+    ///
+    /// Relays that check many actions against a session-held token can parse
+    /// this once and call [`MoqtClaim::permits`] per action. Note that this
+    /// skips the time-based checks that [`Token::verify_claims`] performs.
+    pub fn moqt_claim(&self) -> Result<Option<MoqtClaim>, Error> {
+        self.claims
+            .custom
+            .get(&crate::constants::moqt_keys::MOQT)
+            .map(MoqtClaim::from_cbor)
+            .transpose()
+    }
+
+    /// The MoQ Transport revalidation interval (moqt-reval) in seconds
+    ///
+    /// Returns `None` if the claim is absent or 0, meaning the token must not
+    /// be revalidated. Otherwise the recipient must re-run
+    /// [`Token::verify_claims`] at least this often for ongoing actions and
+    /// stop them once the token is no longer acceptable. The signature check
+    /// may be skipped on revalidation if the trusted keys have not changed.
+    pub fn moqt_reval(&self) -> Result<Option<f64>, Error> {
+        match self
+            .claims
+            .custom
+            .get(&crate::constants::moqt_keys::MOQT_REVAL)
+        {
+            Some(value) => parse_moqt_reval(value),
+            None => Ok(None),
+        }
+    }
 }
 
 /// Options for token verification
@@ -1165,6 +1235,14 @@ pub struct VerificationOptions {
     pub fingerprint_type: Option<FingerprintType>,
     /// Fingerprint Value to verify against CATTPRINT claim
     pub fingerprint_value: Option<String>,
+    /// Verify MoQ Transport claims (moqt, moqt-reval) against `moqt_request`
+    pub verify_moqt: bool,
+    /// Require the moqt claim (default-deny for tokens without one)
+    pub require_moqt: bool,
+    /// MoQ request to verify against the moqt claim
+    pub moqt_request: Option<MoqtRequest>,
+    /// This recipient's ability to honor the moqt-reval claim
+    pub moqt_revalidation: MoqtRevalidation,
 }
 
 impl VerificationOptions {
@@ -1187,6 +1265,10 @@ impl VerificationOptions {
             verify_cattprint: false,
             fingerprint_type: None,
             fingerprint_value: None,
+            verify_moqt: false,
+            require_moqt: false,
+            moqt_request: None,
+            moqt_revalidation: MoqtRevalidation::Unsupported,
         }
     }
 
@@ -1285,6 +1367,33 @@ impl VerificationOptions {
         self.fingerprint_value = Some(fingerprint_value.into());
         self
     }
+
+    /// Set whether to verify MoQ Transport claims (moqt, moqt-reval)
+    pub fn verify_moqt(mut self, verify: bool) -> Self {
+        self.verify_moqt = verify;
+        self
+    }
+
+    /// Set whether to require the moqt claim
+    ///
+    /// The moqt claim is optional in draft-ietf-moq-c4m, so by default a token
+    /// without one passes MoQ verification. Set this to deny such tokens.
+    pub fn require_moqt(mut self, require: bool) -> Self {
+        self.require_moqt = require;
+        self
+    }
+
+    /// Set the MoQ request to verify against the moqt claim
+    pub fn moqt_request(mut self, request: MoqtRequest) -> Self {
+        self.moqt_request = Some(request);
+        self
+    }
+
+    /// Set this recipient's ability to honor the moqt-reval claim
+    pub fn moqt_revalidation(mut self, revalidation: MoqtRevalidation) -> Self {
+        self.moqt_revalidation = revalidation;
+        self
+    }
 }
 
 /// Builder for creating tokens
@@ -1357,6 +1466,23 @@ impl TokenBuilder {
     /// Add a custom claim with an array value
     pub fn custom_array(mut self, key: i32, value: Vec<CborValue>) -> Self {
         self.claims.custom.insert(key, CborValue::Array(value));
+        self
+    }
+
+    /// Set the MoQ Transport scope (moqt) claim
+    pub fn moqt(mut self, claim: MoqtClaim) -> Self {
+        self.claims
+            .custom
+            .insert(crate::constants::moqt_keys::MOQT, claim.to_cbor());
+        self
+    }
+
+    /// Set the MoQ Transport revalidation interval (moqt-reval) in seconds
+    pub fn moqt_reval(mut self, seconds: u64) -> Self {
+        self.claims.custom.insert(
+            crate::constants::moqt_keys::MOQT_REVAL,
+            CborValue::Integer(i64::try_from(seconds).unwrap_or(i64::MAX)),
+        );
         self
     }
 
@@ -1584,6 +1710,22 @@ fn encode_cbor_value(value: &CborValue, enc: &mut Encoder<&mut Vec<u8>>) -> Resu
         CborValue::Null => {
             enc.null()?;
         }
+        CborValue::Float(f) => {
+            encode_float(*f, enc)?;
+        }
+    }
+    Ok(())
+}
+
+/// Encode a float using the shortest of half, single, or double precision
+/// that represents it exactly (RFC 8949 §4.2.2 preferred serialization).
+fn encode_float(f: f64, enc: &mut Encoder<&mut Vec<u8>>) -> Result<(), Error> {
+    if f.is_nan() || f64::from(half::f16::from_f64(f)) == f {
+        enc.f16(f as f32)?;
+    } else if f64::from(f as f32) == f {
+        enc.f32(f as f32)?;
+    } else {
+        enc.f64(f)?;
     }
     Ok(())
 }
@@ -1654,6 +1796,12 @@ fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
             // Null value
             dec.null()?;
             CborValue::Null
+        } else if datatype == minicbor::data::Type::F16
+            || datatype == minicbor::data::Type::F32
+            || datatype == minicbor::data::Type::F64
+        {
+            // Floating-point value (any width widens losslessly to f64)
+            CborValue::Float(dec.f64()?)
         } else {
             // Unsupported type
             return Err(Error::InvalidFormat(format!(
@@ -1718,6 +1866,12 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
             // Null value
             dec.null()?;
             CborValue::Null
+        } else if datatype == minicbor::data::Type::F16
+            || datatype == minicbor::data::Type::F32
+            || datatype == minicbor::data::Type::F64
+        {
+            // Floating-point value (any width widens losslessly to f64)
+            CborValue::Float(dec.f64()?)
         } else {
             // Unsupported type
             return Err(Error::InvalidFormat(format!(
