@@ -19,7 +19,8 @@ use std::fs;
 use std::path::Path;
 
 use common_access_token::{
-    current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
+    current_timestamp, Algorithm, KeyId, RegisteredClaims, Token, TokenBuilder,
+    VerificationOptions, VerifyingKey,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use ct_codecs::{Base64, Decoder};
@@ -43,8 +44,20 @@ struct AlgCase {
     algorithm: Algorithm,
     /// Key passed to `sign` (HMAC secret, or PKCS#8 DER private key).
     signing_key: Vec<u8>,
-    /// Key passed to `verify` (same HMAC secret, or SPKI DER public key).
+    /// Key passed to `verify_with_key` (same HMAC secret, or SPKI DER public key).
     verifying_key: Vec<u8>,
+}
+
+impl AlgCase {
+    /// The verifying key typed to this case's algorithm.
+    fn typed_verifying_key(&self) -> VerifyingKey<'_> {
+        match self.algorithm {
+            Algorithm::HmacSha256 => VerifyingKey::HmacSha256(&self.verifying_key),
+            Algorithm::Es256 => VerifyingKey::Es256(&self.verifying_key),
+            Algorithm::Ps256 => VerifyingKey::Ps256(&self.verifying_key),
+            other => unreachable!("no benchmark case for {other:?}"),
+        }
+    }
 }
 
 /// Build the set of algorithms to benchmark.
@@ -121,10 +134,11 @@ fn bench_verify(c: &mut Criterion) {
         let decoded = Token::from_bytes(&bytes).expect("decode");
 
         // Sanity check before timing so a broken setup fails loudly.
-        decoded.verify(&case.verifying_key).expect("verify");
+        let key = case.typed_verifying_key();
+        decoded.verify_with_key(key).expect("verify");
 
         group.bench_function(case.id, |b| {
-            b.iter(|| decoded.verify(&case.verifying_key).expect("verify"));
+            b.iter(|| decoded.verify_with_key(key).expect("verify"));
         });
     }
     group.finish();

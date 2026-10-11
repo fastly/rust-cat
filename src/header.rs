@@ -14,6 +14,7 @@
 
 use crate::constants::cose_algs;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Supported algorithms for token signing and verification.
 ///
@@ -138,6 +139,74 @@ impl Algorithm {
     /// algorithms that use the COSE_Sign1 structure.
     pub fn is_mac(&self) -> bool {
         matches!(self.class(), AlgorithmClass::Mac)
+    }
+}
+
+/// A typed verification key, used by [`crate::token::Token::verify_with_key`].
+///
+/// Each variant carries the key material *and* the algorithm it is valid for.
+/// Because the key's type is the algorithm, the token's self-declared `alg`
+/// header cannot steer verification to a different cryptographic primitive:
+/// `verify_with_key` rejects any token whose header algorithm does not match
+/// the key's algorithm before running any cryptography.
+///
+/// This prevents algorithm-confusion forgery. For example, an attacker who
+/// crafts a token with `alg = HmacSha256` and a MAC computed over the (public)
+/// ES256 verification key cannot have it accepted by a verifier that supplies a
+/// [`VerifyingKey::Es256`] key, because the algorithms do not match.
+///
+/// # Example
+///
+/// ```
+/// use common_access_token::VerifyingKey;
+///
+/// let secret = b"my-secret-key";
+/// let key = VerifyingKey::HmacSha256(secret);
+/// ```
+///
+/// The [`Debug`] implementation never prints key material, so a
+/// `VerifyingKey` holding an HMAC secret is safe to log.
+#[derive(Clone, Copy)]
+#[non_exhaustive]
+pub enum VerifyingKey<'a> {
+    /// HMAC-SHA256 shared secret, as raw key bytes (COSE_Mac0, alg 5).
+    HmacSha256(&'a [u8]),
+    /// ES256 public key, as SPKI DER (COSE_Sign1, alg -7).
+    Es256(&'a [u8]),
+    /// PS256 public key, as SPKI DER (COSE_Sign1, alg -37).
+    Ps256(&'a [u8]),
+}
+
+impl VerifyingKey<'_> {
+    /// The algorithm this key is valid for.
+    pub fn algorithm(&self) -> Algorithm {
+        match self {
+            VerifyingKey::HmacSha256(_) => Algorithm::HmacSha256,
+            VerifyingKey::Es256(_) => Algorithm::Es256,
+            VerifyingKey::Ps256(_) => Algorithm::Ps256,
+        }
+    }
+
+    /// The raw key material.
+    pub fn key_bytes(&self) -> &[u8] {
+        match self {
+            VerifyingKey::HmacSha256(k) | VerifyingKey::Es256(k) | VerifyingKey::Ps256(k) => k,
+        }
+    }
+}
+
+// Manual impl so the HMAC shared secret (and, for consistency, public key
+// bytes) never ends up in logs, panics, or other diagnostics.
+impl fmt::Debug for VerifyingKey<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            VerifyingKey::HmacSha256(_) => "HmacSha256",
+            VerifyingKey::Es256(_) => "Es256",
+            VerifyingKey::Ps256(_) => "Ps256",
+        };
+        f.debug_tuple(name)
+            .field(&format_args!("<redacted>"))
+            .finish()
     }
 }
 

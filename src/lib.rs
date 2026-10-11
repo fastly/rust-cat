@@ -22,7 +22,7 @@
 //! ## Basic Example
 //!
 //! ```rust
-//! use common_access_token::{Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerificationOptions};
+//! use common_access_token::{Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerificationOptions, VerifyingKey};
 //! use common_access_token::current_timestamp;
 //!
 //! // Create a key for signing and verification
@@ -52,7 +52,7 @@
 //!     .expect("Failed to decode token");
 //!
 //! // Verify the signature
-//! decoded_token.verify(key).expect("Failed to verify signature");
+//! decoded_token.verify_with_key(VerifyingKey::HmacSha256(key)).expect("Failed to verify signature");
 //!
 //! // Verify the claims
 //! let options = VerificationOptions::new()
@@ -66,7 +66,7 @@
 //!
 //! ```rust
 //! use common_access_token::{
-//!     Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerificationOptions,
+//!     Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerificationOptions, VerifyingKey,
 //!     cat_keys, catm, catr, catreplay, catu, uri_components, current_timestamp,
 //!     cattprint, FingerprintType
 //! };
@@ -113,7 +113,7 @@
 //!     .expect("Failed to decode token");
 //!
 //! // Verify signature
-//! decoded_token.verify(key).expect("Failed to verify signature");
+//! decoded_token.verify_with_key(VerifyingKey::HmacSha256(key)).expect("Failed to verify signature");
 //!
 //! // Verify standard claims and CAT-specific claims
 //! let options = VerificationOptions::new()
@@ -148,7 +148,7 @@ pub use constants::{
     replay_values, tprint_params, uri_components, FingerprintType,
 };
 pub use error::Error;
-pub use header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId};
+pub use header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId, VerifyingKey};
 pub use token::{Token, TokenBuilder, VerificationOptions};
 pub use utils::current_timestamp;
 
