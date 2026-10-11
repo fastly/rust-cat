@@ -2291,8 +2291,9 @@ fn test_alg_confusion_hmac_over_public_key_is_rejected() {
     );
 }
 
-/// The deprecated `verify` refuses asymmetric algorithms outright, so it can no
-/// longer be used to mount the confusion attack.
+/// The deprecated `verify` refuses tokens that declare an asymmetric algorithm.
+/// Note this alone does not stop the confusion attack — see
+/// `test_deprecated_verify_with_public_key_still_accepts_hmac_forgery`.
 #[test]
 #[allow(deprecated)]
 fn test_deprecated_verify_rejects_asymmetric() {
@@ -2305,6 +2306,48 @@ fn test_deprecated_verify_rejects_asymmetric() {
     assert!(
         matches!(result, Err(crate::error::Error::InvalidAlgorithm(_))),
         "deprecated verify must reject ES256, got {result:?}"
+    );
+}
+
+/// Documents the safety boundary of the deprecated `verify`: it is HMAC-only and
+/// dispatches on the token's own `alg`, so a caller who (wrongly) passes an
+/// asymmetric public key can still be fooled by an `HmacSha256` forgery. The
+/// protection comes from `verify_with_key` with a typed asymmetric key, not from
+/// `verify` itself. If this test starts failing, `verify` has been hardened
+/// further and its docs should be updated to match.
+#[test]
+#[allow(deprecated)]
+fn test_deprecated_verify_with_public_key_still_accepts_hmac_forgery() {
+    let (_es_priv, es_pub) = es256_keys();
+
+    let forged = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(RegisteredClaims::new().with_issuer("attacker"))
+        .sign(&es_pub)
+        .expect("forged token signs");
+    let token_bytes = forged.to_bytes().expect("encode");
+    let decoded = Token::from_bytes(&token_bytes).expect("decode");
+
+    assert!(
+        decoded.verify(&es_pub).is_ok(),
+        "legacy verify treats key bytes as an HMAC secret; never pass it a public key"
+    );
+    assert!(matches!(
+        decoded.verify_with_key(VerifyingKey::Es256(&es_pub)),
+        Err(crate::error::Error::InvalidAlgorithm(_))
+    ));
+}
+
+/// `VerifyingKey`'s Debug output must never include key material.
+#[test]
+fn test_verifying_key_debug_redacts_key_bytes() {
+    let secret = b"super-secret-hmac-key";
+    let rendered = format!("{:?}", VerifyingKey::HmacSha256(secret));
+    assert_eq!(rendered, "HmacSha256(<redacted>)");
+    assert!(!rendered.contains("115")); // b's' as a decimal byte
+    assert_eq!(
+        format!("{:?}", VerifyingKey::Es256(&[1, 2, 3])),
+        "Es256(<redacted>)"
     );
 }
 

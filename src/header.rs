@@ -14,6 +14,7 @@
 
 use crate::constants::cose_algs;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Supported algorithms for token signing and verification.
 ///
@@ -162,7 +163,11 @@ impl Algorithm {
 /// let secret = b"my-secret-key";
 /// let key = VerifyingKey::HmacSha256(secret);
 /// ```
-#[derive(Debug, Clone, Copy)]
+///
+/// The [`Debug`] implementation never prints key material, so a
+/// `VerifyingKey` holding an HMAC secret is safe to log.
+#[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum VerifyingKey<'a> {
     /// HMAC-SHA256 shared secret, as raw key bytes (COSE_Mac0, alg 5).
     HmacSha256(&'a [u8]),
@@ -187,6 +192,21 @@ impl VerifyingKey<'_> {
         match self {
             VerifyingKey::HmacSha256(k) | VerifyingKey::Es256(k) | VerifyingKey::Ps256(k) => k,
         }
+    }
+}
+
+// Manual impl so the HMAC shared secret (and, for consistency, public key
+// bytes) never ends up in logs, panics, or other diagnostics.
+impl fmt::Debug for VerifyingKey<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            VerifyingKey::HmacSha256(_) => "HmacSha256",
+            VerifyingKey::Es256(_) => "Es256",
+            VerifyingKey::Ps256(_) => "Ps256",
+        };
+        f.debug_tuple(name)
+            .field(&format_args!("<redacted>"))
+            .finish()
     }
 }
 

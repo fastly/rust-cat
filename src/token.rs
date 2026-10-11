@@ -184,14 +184,20 @@ impl Token {
     /// For asymmetric algorithms that is unsafe: an attacker can craft a token
     /// with `alg = HmacSha256` and a MAC computed over your (public) ES256/PS256
     /// verification key, and this method would accept it — an algorithm-confusion
-    /// forgery. To avoid that, this method now only accepts MAC (HMAC-SHA256)
-    /// tokens and returns [`Error::InvalidAlgorithm`] for ES256/PS256.
+    /// forgery.
+    ///
+    /// This method now only accepts MAC (HMAC-SHA256) tokens and returns
+    /// [`Error::InvalidAlgorithm`] for ES256/PS256. That does **not** make it
+    /// safe to call with a public key: the forged token above declares
+    /// `alg = HmacSha256`, so it is still routed to HMAC verification and will
+    /// be accepted. Only ever pass an HMAC *secret* to this method.
     ///
     /// Use [`Token::verify_with_key`] with a typed [`VerifyingKey`] instead; it
-    /// binds the algorithm to the key and supports all algorithms safely.
+    /// binds the algorithm to the key, which is what actually prevents the
+    /// forgery, and supports all algorithms.
     #[deprecated(
         since = "0.3.0",
-        note = "use `verify_with_key` with a typed `VerifyingKey`; `verify` no longer supports ES256/PS256 to prevent algorithm-confusion forgery"
+        note = "use `verify_with_key` with a typed `VerifyingKey`; `verify` trusts the token's `alg` header and is only safe with an HMAC secret, never a public key"
     )]
     pub fn verify(&self, key: &[u8]) -> Result<(), Error> {
         let alg = self.header.algorithm().ok_or_else(|| {
@@ -221,7 +227,7 @@ impl Token {
     ///   COSE_Mac0 inputs are tried.
     /// - **Es256** and **Ps256** are asymmetric signature algorithms and use the
     ///   COSE_Sign1 structure. The key must be the SPKI DER-encoded public key.
-    pub fn verify_with_key(&self, key: VerifyingKey) -> Result<(), Error> {
+    pub fn verify_with_key(&self, key: VerifyingKey<'_>) -> Result<(), Error> {
         let alg = self.header.algorithm().ok_or_else(|| {
             Error::InvalidFormat("Missing algorithm in protected header".to_string())
         })?;
