@@ -151,3 +151,50 @@ prefixes (with implicit size ceilings) that `minicbor::Encoder` already produces
 Low risk today, but they can drift from what the library emits. Test-only.
 
 - Location: `src/tests.rs`.
+
+## MoQ (draft-ietf-moq-c4m) — deferred from the initial `moqt` support
+
+### Migrate MoQ docs, tests, and example to `verify_with_key` after PR #6
+
+The MoQ tests (`src/tests_moqt.rs`), `examples/moqt.rs`, and the README MoQ
+snippet call `Token::verify`, because `VerifyingKey` isn't on `main` yet. Once #6
+merges, they'll trigger deprecation warnings and fail `clippy -D warnings`.
+
+- **Fix direction:**
+  - Run `grep -rn '\.verify(' src/tests_moqt.rs examples/moqt.rs README.md`
+    and switch each hit to `verify_with_key(VerifyingKey::…)`. The `TODO(#6)`
+    markers show where.
+  - Add a test that an `alg = HS256` forgery over an ES256 validator's public key
+    is rejected even when its `moqt` scope would permit the request.
+  - Optionally add a `Token::verify_moqt(key, &options)` convenience that does
+    both checks.
+- **Why it matters:** MoQ publishers and origins are expected to verify with a
+  public key, which is exactly the algorithm-confusion case. MoQ support
+  shouldn't ship in a release without #6.
+
+### Composite claims (`or` / `and` / `nor` / `crit`)
+
+The draft uses draft-lemmons-cose-composite-claims to bind different `exp` values
+to different `moqt` scopes. All of those claim keys are still TBD.
+
+- **Fix direction:** evaluate nested claim sets recursively, with a depth limit
+  of at least 4. Reject `moqt-reval` inside composite claims; the draft makes
+  such tokens not well-formed.
+
+### DPoP proof verification
+
+Tokens can be bound to a client key with `cnf.jkt` (key 8 / 3) and `catdpop`.
+Validators then check a `dpop-proof+jwt` whose `actx` names the MoQT action,
+`tns`, and `tn`.
+
+- **Fix direction:** this needs a JWT/JWK stack, so build it as a feature-gated
+  module or a separate crate. It can reuse `MoqtRequest` to check `actx`. Until
+  it exists, forwarded client tokens are bearer tokens.
+
+### Spec ambiguities to revisit as the draft evolves
+
+- Whether namespace and track matches apply to session and namespace actions.
+  The current implementation ignores them for session actions and ignores the
+  track match for namespace actions; see the `moqt` module docs.
+- How a server presents a token to a client for `SERVER_SETUP`.
+- The final IANA claim keys. 327 and 328 are taken from the test vectors.

@@ -18,6 +18,7 @@
 //! - CAT-specific claims for URI validation (CATU), HTTP method restrictions (CATM),
 //!   replay protection (CATREPLAY), and token renewal (CATR)
 //! - Comprehensive token verification including CAT-specific claim validation
+//! - Media over QUIC Transport scopes (`moqt`, `moqt-reval`) from draft-ietf-moq-c4m; see [`moqt`]
 //!
 //! ## Basic Example
 //!
@@ -135,6 +136,7 @@ pub mod claims;
 pub mod constants;
 pub mod error;
 pub mod header;
+pub mod moqt;
 pub mod token;
 pub mod utils;
 
@@ -144,16 +146,24 @@ pub use cat_claims::{
 };
 pub use claims::{Claims, RegisteredClaims};
 pub use constants::{
-    cat_keys, cose_algs, cose_labels, cwt_keys, match_types, renewal_params, renewal_types,
-    replay_values, tprint_params, uri_components, FingerprintType,
+    cat_keys, cose_algs, cose_labels, cwt_keys, match_types, moqt_actions, moqt_keys,
+    moqt_match_types, renewal_params, renewal_types, replay_values, tprint_params, uri_components,
+    FingerprintType,
 };
 pub use error::Error;
 pub use header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId, VerifyingKey};
 pub use token::{Token, TokenBuilder, VerificationOptions};
 pub use utils::current_timestamp;
 
+pub use moqt::{
+    parse_moqt_reval, BinMatch, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation, MoqtScope,
+    MoqtTarget,
+};
+
 /// Re-export minicbor for users of this crate
 pub use minicbor;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_moqt;
