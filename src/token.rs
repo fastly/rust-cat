@@ -196,7 +196,7 @@ impl Token {
     /// binds the algorithm to the key, which is what actually prevents the
     /// forgery, and supports all algorithms.
     #[deprecated(
-        since = "0.3.0",
+        since = "0.4.0",
         note = "use `verify_with_key` with a typed `VerifyingKey`; `verify` trusts the token's `alg` header and is only safe with an HMAC secret, never a public key"
     )]
     pub fn verify(&self, key: &[u8]) -> Result<(), Error> {
