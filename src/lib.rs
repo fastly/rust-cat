@@ -156,4 +156,7 @@ pub use utils::current_timestamp;
 pub use minicbor;
 
 #[cfg(test)]
+mod tests_cose;
+
+#[cfg(test)]
 mod tests;

@@ -30,26 +30,6 @@ classic JWT `alg`-confusion attack.
   independently and soon. Reviewed and consciously deferred (PR #5).
 - Location: `src/token.rs` — `Token::verify`.
 
-### COSE structure tag and `alg` are not cross-checked on decode
-
-`from_bytes` decodes and discards the COSE structure tag (it skips up to two
-tags as noise), so the tag and the protected-header `alg` are never compared.
-`to_bytes` carefully selects the wire tag from the algorithm's class (COSE_Mac0
-= 17 for MAC, COSE_Sign1 = 18 for signature), but the inverse path never
-enforces that invariant: a token tagged COSE_Mac0 (17) carrying `alg = -7`
-(ES256), or tagged COSE_Sign1 (18) carrying `alg = 5` (HMAC), decodes and
-verifies with no complaint. The class → tag invariant the encoder writes is
-write-only.
-
-- **Fix direction:** when a recognized COSE structure tag (17/18) is present,
-  reject it if it disagrees with `alg.class()`. Tolerate the untagged / unknown
-  CWT-tag cases as today.
-- **Why deferred:** this is the same "harden what the decoder trusts" policy as
-  the algorithm-confusion item above (what to reject vs. tolerate should be
-  designed once), and it pairs naturally with that PR. Low impact on its own —
-  only a malformed/contradictory producer is affected.
-- Location: `src/token.rs` — `Token::from_bytes`.
-
 ## Data model (separate PR — breaking)
 
 ### Array-valued `aud` is not readable through the typed API
