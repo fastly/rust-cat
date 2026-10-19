@@ -82,12 +82,14 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
 /// nor PSS verification impose any size floor, so without this check a token
 /// signed under a tiny key would be accepted and could be forged by an
 /// attacker. We enforce the floor on both the signing and verification paths.
+#[cfg(feature = "ps256")]
 const MIN_RSA_KEY_BITS: usize = 2048;
 
 /// Reject an RSA modulus smaller than [`MIN_RSA_KEY_BITS`].
 ///
 /// Shared by `compute_ps256` and `verify_ps256` so the floor policy (and its
 /// error message) cannot drift between the signing and verification paths.
+#[cfg(feature = "ps256")]
 fn ensure_rsa_key_bits(key_bits: usize) -> Result<(), Error> {
     if key_bits < MIN_RSA_KEY_BITS {
         return Err(Error::InvalidKey(format!(
@@ -102,6 +104,7 @@ fn ensure_rsa_key_bits(key_bits: usize) -> Result<(), Error> {
 /// `key` must be a PKCS#8 DER-encoded RSA private key whose modulus is at least
 /// [`MIN_RSA_KEY_BITS`] bits. PSS uses a random salt, so an OS-provided RNG is
 /// used (WASM-friendly via `getrandom`).
+#[cfg(feature = "ps256")]
 pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     use rsa::pkcs8::DecodePrivateKey;
     use rsa::pss::SigningKey;
@@ -122,6 +125,7 @@ pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
 ///
 /// `key` must be an SPKI DER-encoded RSA public key whose modulus is at least
 /// [`MIN_RSA_KEY_BITS`] bits; smaller keys are rejected as insecure.
+#[cfg(feature = "ps256")]
 pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Error> {
     use rsa::pkcs8::DecodePublicKey;
     use rsa::pss::{Signature, VerifyingKey};
@@ -137,6 +141,23 @@ pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
     verifying_key
         .verify(data, &signature)
         .map_err(|_| Error::SignatureVerification)
+}
+
+/// PS256 is unavailable without the `ps256` feature.
+#[cfg(not(feature = "ps256"))]
+pub fn compute_ps256(_key: &[u8], _data: &[u8]) -> Result<Vec<u8>, Error> {
+    Err(ps256_disabled())
+}
+
+/// PS256 is unavailable without the `ps256` feature.
+#[cfg(not(feature = "ps256"))]
+pub fn verify_ps256(_key: &[u8], _data: &[u8], _signature: &[u8]) -> Result<(), Error> {
+    Err(ps256_disabled())
+}
+
+#[cfg(not(feature = "ps256"))]
+fn ps256_disabled() -> Error {
+    Error::InvalidAlgorithm("PS256 support requires the `ps256` feature".to_string())
 }
 
 /// Get current timestamp in seconds since Unix epoch

@@ -173,6 +173,15 @@ The library supports three algorithms, selected via `Algorithm` on the builder. 
 
 ES256 is ECDSA over the NIST P-256 curve with SHA-256; signatures are the fixed 64-byte COSE `r || s` form. PS256 is RSASSA-PSS with SHA-256 and MGF1-SHA-256. PSS uses a random salt, so each signature over the same input differs while all remain valid.
 
+PS256 is behind the `ps256` cargo feature, which is enabled by default. It pulls in the `rsa` crate, which has an unfixed private-key timing advisory ([RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071)). If you don't need PS256, disable default features to drop `rsa` from your dependency tree:
+
+```toml
+[dependencies]
+common-access-token = { version = "0.4", default-features = false }
+```
+
+Without the feature, `Algorithm::Ps256` still exists, but signing or verifying with it returns `Error::InvalidAlgorithm`.
+
 > **Verify with a typed `VerifyingKey`.** `verify_with_key()` binds the algorithm to the key you provide and rejects any token whose header `alg` does not match, which prevents algorithm-confusion forgery (an attacker crafting an `HmacSha256` token whose MAC is computed over your public verification key). The older `verify(&[u8])` is deprecated and only accepts HMAC-SHA256.
 
 ```rust
