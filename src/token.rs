@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::Path;
 
-use crate::moqt::{parse_moqt_reval, MoqtClaim, MoqtRequest, MoqtRevalidation};
+use crate::moqt::{parse_moqt_reval, MoqtClaim, MoqtClaimLabels, MoqtRequest, MoqtRevalidation};
 
 /// Common Access Token structure
 #[derive(Debug, Clone)]
@@ -346,7 +346,8 @@ impl Token {
             Error::InvalidClaimValue("No MoQ request provided for moqt verification".to_string())
         })?;
 
-        if let Some(reval) = self.moqt_reval()? {
+        let labels = options.moqt_claim_labels;
+        if let Some(reval) = self.moqt_reval_at(labels.reval)? {
             match options.moqt_revalidation {
                 MoqtRevalidation::Unsupported => {
                     return Err(Error::MoqtRevalidationUnsupported(format!(
@@ -362,7 +363,7 @@ impl Token {
             }
         }
 
-        match self.moqt_claim()? {
+        match self.moqt_claim_at(labels.moqt)? {
             Some(claim) if claim.permits(request) => Ok(()),
             Some(_) => Err(Error::MoqtNotAuthorized(format!(
                 "no moqt scope permits {request}"
@@ -1225,9 +1226,14 @@ impl Token {
     /// this once and call [`MoqtClaim::permits`] per action. Note that this
     /// skips the time-based checks that [`Token::verify_claims`] performs.
     pub fn moqt_claim(&self) -> Result<Option<MoqtClaim>, Error> {
+        self.moqt_claim_at(MoqtClaimLabels::default().moqt)
+    }
+
+    /// Parse a moqt claim stored under `label` instead of the default label
+    pub fn moqt_claim_at(&self, label: i32) -> Result<Option<MoqtClaim>, Error> {
         self.claims
             .custom
-            .get(&crate::constants::moqt_keys::MOQT)
+            .get(&label)
             .map(MoqtClaim::from_cbor)
             .transpose()
     }
@@ -1240,11 +1246,12 @@ impl Token {
     /// stop them once the token is no longer acceptable. The signature check
     /// may be skipped on revalidation if the trusted keys have not changed.
     pub fn moqt_reval(&self) -> Result<Option<f64>, Error> {
-        match self
-            .claims
-            .custom
-            .get(&crate::constants::moqt_keys::MOQT_REVAL)
-        {
+        self.moqt_reval_at(MoqtClaimLabels::default().reval)
+    }
+
+    /// Read a moqt-reval claim stored under `label` instead of the default label
+    pub fn moqt_reval_at(&self, label: i32) -> Result<Option<f64>, Error> {
+        match self.claims.custom.get(&label) {
             Some(value) => parse_moqt_reval(value),
             None => Ok(None),
         }
@@ -1294,6 +1301,8 @@ pub struct VerificationOptions {
     pub moqt_request: Option<MoqtRequest>,
     /// This recipient's ability to honor the moqt-reval claim
     pub moqt_revalidation: MoqtRevalidation,
+    /// Labels under which the moqt and moqt-reval claims are read
+    pub moqt_claim_labels: MoqtClaimLabels,
 }
 
 impl VerificationOptions {
@@ -1319,6 +1328,7 @@ impl VerificationOptions {
             verify_moqt: false,
             moqt_request: None,
             moqt_revalidation: MoqtRevalidation::Unsupported,
+            moqt_claim_labels: MoqtClaimLabels::default(),
         }
     }
 
@@ -1437,6 +1447,14 @@ impl VerificationOptions {
     /// Set this recipient's ability to honor the moqt-reval claim
     pub fn moqt_revalidation(mut self, revalidation: MoqtRevalidation) -> Self {
         self.moqt_revalidation = revalidation;
+        self
+    }
+
+    /// Set the labels under which the moqt and moqt-reval claims are read
+    ///
+    /// Defaults to the provisional labels 327 and 328 (see [`MoqtClaimLabels`]).
+    pub fn moqt_claim_labels(mut self, labels: MoqtClaimLabels) -> Self {
+        self.moqt_claim_labels = labels;
         self
     }
 }

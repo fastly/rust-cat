@@ -57,7 +57,7 @@
 //! assert!(!claim.permits(&subscribe));
 //! ```
 
-use crate::constants::{moqt_actions, moqt_match_types};
+use crate::constants::{moqt_actions, moqt_keys, moqt_match_types};
 use crate::error::Error;
 use crate::header::CborValue;
 
@@ -551,6 +551,31 @@ pub enum MoqtRevalidation {
     Unsupported,
     /// This recipient revalidates, at most once per this many seconds
     MinInterval(u64),
+}
+
+/// The claim labels under which `moqt` and `moqt-reval` are read
+///
+/// The defaults (327 and 328, from [`moqt_keys`]) are provisional values taken
+/// from the draft's test vectors; IANA has not yet assigned the labels. Override
+/// them to interoperate with issuers that use different labels in the meantime.
+/// Issuers can write a claim at any label with
+/// [`TokenBuilder::custom_cbor`](crate::TokenBuilder::custom_cbor) and
+/// [`MoqtClaim::to_cbor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoqtClaimLabels {
+    /// Label of the moqt (scope) claim
+    pub moqt: i32,
+    /// Label of the moqt-reval (revalidation interval) claim
+    pub reval: i32,
+}
+
+impl Default for MoqtClaimLabels {
+    fn default() -> Self {
+        Self {
+            moqt: moqt_keys::MOQT,
+            reval: moqt_keys::MOQT_REVAL,
+        }
+    }
 }
 
 /// Parse a `moqt-reval` value, returning `None` when revalidation is not

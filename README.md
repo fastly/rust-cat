@@ -416,6 +416,9 @@ The `moqt` and `moqt-reval` claims from
 authorize MoQ Transport actions on specific Full Track Names (namespace tuple +
 track name). The claim keys (327, 328) are provisional and come from the draft's
 test vectors; they're exposed as `moqt_keys::MOQT` and `moqt_keys::MOQT_REVAL`.
+To interoperate with an issuer that uses other labels before IANA assignment,
+set `VerificationOptions::moqt_claim_labels`, or read a claim with
+`Token::moqt_claim_at` / `moqt_reval_at`.
 
 ```rust
 use common_access_token::{

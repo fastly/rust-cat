@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bytewise against Full Track Names.
   - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
   - `Token::moqt_claim` and `Token::moqt_reval`.
-  - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation}`.
+  - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation,
+    moqt_claim_labels}`. `MoqtClaimLabels` overrides the provisional claim
+    labels, and `Token::moqt_claim_at` / `moqt_reval_at` read a claim at any
+    label.
     With `verify_moqt`, tokens without a `moqt` claim are denied.
   - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`, and
     `Error::MoqtRevalidationUnsupported`.

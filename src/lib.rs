@@ -156,8 +156,8 @@ pub use token::{Token, TokenBuilder, VerificationOptions};
 pub use utils::current_timestamp;
 
 pub use moqt::{
-    parse_moqt_reval, BinMatch, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation, MoqtScope,
-    MoqtTarget,
+    parse_moqt_reval, BinMatch, MoqtAction, MoqtClaim, MoqtClaimLabels, MoqtRequest,
+    MoqtRevalidation, MoqtScope, MoqtTarget,
 };
 
 /// Re-export minicbor for users of this crate

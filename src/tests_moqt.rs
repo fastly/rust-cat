@@ -4,7 +4,9 @@ use crate::{
     claims::RegisteredClaims,
     constants::moqt_keys,
     header::{Algorithm, CborValue},
-    moqt::{BinMatch, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation, MoqtScope},
+    moqt::{
+        BinMatch, MoqtAction, MoqtClaim, MoqtClaimLabels, MoqtRequest, MoqtRevalidation, MoqtScope,
+    },
     token::{Token, TokenBuilder, VerificationOptions},
     utils::current_timestamp,
     Error,
@@ -596,4 +598,56 @@ fn test_moqt_es256_publisher_validates_with_public_key() {
         ))),
         Err(Error::MoqtNotAuthorized(_))
     ));
+}
+
+#[test]
+fn test_moqt_custom_claim_labels() {
+    // An issuer using non-default labels before IANA assignment
+    let labels = MoqtClaimLabels {
+        moqt: 60001,
+        reval: 60002,
+    };
+    let claim = MoqtClaim::new(vec![MoqtScope::new([Subscribe]).namespace_exact("a")]);
+    let token = signed(
+        TokenBuilder::new()
+            .custom_cbor(labels.moqt, claim.to_cbor())
+            .custom_cbor(labels.reval, CborValue::Integer(120)),
+    );
+    let request = || track(Subscribe, &["a"], "t");
+
+    // At the default labels the token carries no moqt claim, so it's denied
+    assert_eq!(token.moqt_claim().unwrap(), None);
+    assert!(matches!(
+        token.verify_claims(&options(request())),
+        Err(Error::MoqtNotAuthorized(_))
+    ));
+
+    // With the issuer's labels, both claims are read and enforced
+    assert_eq!(token.moqt_claim_at(labels.moqt).unwrap(), Some(claim));
+    assert_eq!(token.moqt_reval_at(labels.reval).unwrap(), Some(120.0));
+    let custom = || options(request()).moqt_claim_labels(labels);
+    assert!(matches!(
+        token.verify_claims(&custom()),
+        Err(Error::MoqtRevalidationUnsupported(_))
+    ));
+    assert!(token
+        .verify_claims(&custom().moqt_revalidation(MoqtRevalidation::MinInterval(60)))
+        .is_ok());
+    assert!(matches!(
+        token.verify_claims(
+            &custom()
+                .moqt_revalidation(MoqtRevalidation::MinInterval(60))
+                .moqt_request(track(Subscribe, &["b"], "t"))
+        ),
+        Err(Error::MoqtNotAuthorized(_))
+    ));
+
+    // Default::default() uses the provisional labels, not 0
+    assert_eq!(
+        VerificationOptions::default().moqt_claim_labels,
+        MoqtClaimLabels {
+            moqt: moqt_keys::MOQT,
+            reval: moqt_keys::MOQT_REVAL
+        }
+    );
 }
