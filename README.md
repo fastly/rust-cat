@@ -448,7 +448,6 @@ token.verify(key).unwrap();
 
 let options = VerificationOptions::new()
     .verify_moqt(true)
-    .require_moqt(true)
     .moqt_revalidation(MoqtRevalidation::MinInterval(60))
     .moqt_request(MoqtRequest::track(
         MoqtAction::Publish,
@@ -471,8 +470,8 @@ Notes for validators:
   given. A request namespace shorter than the scope's is denied.
 - **Strict parsing.** A malformed `moqt` claim fails verification with
   `Error::InvalidMoqtClaim`. It's never ignored.
-- **Default-deny.** The `moqt` claim is optional in the draft, so set
-  `require_moqt(true)` to reject tokens that don't carry one.
+- **Default-deny.** With `verify_moqt(true)`, a token with no `moqt` claim
+  authorizes no MoQ action, as draft-ietf-moq-c4m §2 requires.
 - **Session-held tokens.** To check later actions (such as `REQUEST_UPDATE`)
   against a token from setup, keep the `Token` and call `verify_claims` again, or
   call `MoqtClaim::permits` on the result of `token.moqt_claim()`. The latter

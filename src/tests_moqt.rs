@@ -400,15 +400,24 @@ fn test_moqt_session_token_rechecked_per_action() {
 }
 
 #[test]
-fn test_moqt_absent_claim_and_require_moqt() {
+fn test_moqt_absent_claim_is_denied() {
+    // draft-ietf-moq-c4m §2: once a token is presented, all actions are
+    // blocked unless explicitly enabled.
     let token = signed(TokenBuilder::new());
-    let request = track(Subscribe, &["a"], "t");
+    for request in [
+        MoqtRequest::session(ClientSetup),
+        MoqtRequest::namespace(SubscribeNamespace, ["a"]),
+        track(Subscribe, &["a"], "t"),
+    ] {
+        assert!(matches!(
+            token.verify_claims(&options(request)),
+            Err(Error::MoqtNotAuthorized(_))
+        ));
+    }
 
-    assert!(token.verify_claims(&options(request.clone())).is_ok());
-    assert!(matches!(
-        token.verify_claims(&options(request).require_moqt(true)),
-        Err(Error::MissingClaim(claim)) if claim == "moqt"
-    ));
+    // Without verify_moqt, MoQ claims are not checked at all
+    let plain = VerificationOptions::new().expected_audience("relay.example.com");
+    assert!(token.verify_claims(&plain).is_ok());
 }
 
 #[test]
@@ -571,8 +580,7 @@ fn test_moqt_es256_publisher_validates_with_public_key() {
     let options = VerificationOptions::new()
         .expected_audience("publisher.example.com")
         .require_aud(true)
-        .verify_moqt(true)
-        .require_moqt(true);
+        .verify_moqt(true);
     assert!(decoded
         .verify_claims(&options.clone().moqt_request(track(
             Subscribe,

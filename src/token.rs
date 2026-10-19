@@ -367,8 +367,11 @@ impl Token {
             Some(_) => Err(Error::MoqtNotAuthorized(format!(
                 "no moqt scope permits {request}"
             ))),
-            None if options.require_moqt => Err(Error::MissingClaim("moqt".to_string())),
-            None => Ok(()),
+            // draft-ietf-moq-c4m §2: once a token is presented, all actions
+            // are blocked unless a scope explicitly enables them.
+            None => Err(Error::MoqtNotAuthorized(format!(
+                "token has no moqt claim, so {request} is blocked"
+            ))),
         }
     }
 
@@ -1284,9 +1287,9 @@ pub struct VerificationOptions {
     /// Fingerprint Value to verify against CATTPRINT claim
     pub fingerprint_value: Option<String>,
     /// Verify MoQ Transport claims (moqt, moqt-reval) against `moqt_request`
+    ///
+    /// Tokens without a moqt claim are denied.
     pub verify_moqt: bool,
-    /// Require the moqt claim (default-deny for tokens without one)
-    pub require_moqt: bool,
     /// MoQ request to verify against the moqt claim
     pub moqt_request: Option<MoqtRequest>,
     /// This recipient's ability to honor the moqt-reval claim
@@ -1314,7 +1317,6 @@ impl VerificationOptions {
             fingerprint_type: None,
             fingerprint_value: None,
             verify_moqt: false,
-            require_moqt: false,
             moqt_request: None,
             moqt_revalidation: MoqtRevalidation::Unsupported,
         }
@@ -1417,17 +1419,12 @@ impl VerificationOptions {
     }
 
     /// Set whether to verify MoQ Transport claims (moqt, moqt-reval)
+    ///
+    /// When enabled, a request is permitted only if a moqt scope enables it.
+    /// As draft-ietf-moq-c4m requires, a token without a moqt claim
+    /// authorizes no MoQ action.
     pub fn verify_moqt(mut self, verify: bool) -> Self {
         self.verify_moqt = verify;
-        self
-    }
-
-    /// Set whether to require the moqt claim
-    ///
-    /// The moqt claim is optional in draft-ietf-moq-c4m, so by default a token
-    /// without one passes MoQ verification. Set this to deny such tokens.
-    pub fn require_moqt(mut self, require: bool) -> Self {
-        self.require_moqt = require;
         self
     }
 

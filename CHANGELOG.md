@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bytewise against Full Track Names.
   - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
   - `Token::moqt_claim` and `Token::moqt_reval`.
-  - `VerificationOptions::{verify_moqt, require_moqt, moqt_request,
-    moqt_revalidation}`.
+  - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation}`.
+    With `verify_moqt`, tokens without a `moqt` claim are denied.
   - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`, and
     `Error::MoqtRevalidationUnsupported`.
   - New constants `moqt_keys`, `moqt_actions`, and `moqt_match_types`. The claim

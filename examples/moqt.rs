@@ -69,7 +69,6 @@ fn edge_relay_validates_subscriber() {
             .expected_audience("relay.example.com")
             .require_aud(true)
             .verify_moqt(true)
-            .require_moqt(true)
             .moqt_revalidation(MoqtRevalidation::MinInterval(60))
             .moqt_request(request)
     };
@@ -170,7 +169,6 @@ fn publisher_validates_relay() {
         .expected_audience("origin.example.com")
         .require_aud(true)
         .verify_moqt(true)
-        .require_moqt(true)
         .moqt_request(MoqtRequest::track(
             MoqtAction::Subscribe,
             ["example.com", "alice"],
