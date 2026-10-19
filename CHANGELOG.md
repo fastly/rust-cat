@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Error::InvalidKey` for malformed DER key material.
 - `examples/asymmetric_signing.rs` and `examples/sample_es256_ps256_tokens.rs`
   demonstrating the new asymmetric algorithms and key formats.
+- `VerificationOptions::now` sets the current time (Unix seconds) used by
+  `verify_claims` for the `exp` and `nbf` checks, so callers can inject a
+  clock. By default the system clock is used, as before.
 
 ### Changed
 
