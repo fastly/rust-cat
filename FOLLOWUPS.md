@@ -154,24 +154,6 @@ Low risk today, but they can drift from what the library emits. Test-only.
 
 ## MoQ (draft-ietf-moq-c4m) — deferred from the initial `moqt` support
 
-### Migrate MoQ docs, tests, and example to `verify_with_key` after PR #6
-
-The MoQ tests (`src/tests_moqt.rs`), `examples/moqt.rs`, and the README MoQ
-snippet call `Token::verify`, because `VerifyingKey` isn't on `main` yet. Once #6
-merges, they'll trigger deprecation warnings and fail `clippy -D warnings`.
-
-- **Fix direction:**
-  - Run `grep -rn '\.verify(' src/tests_moqt.rs examples/moqt.rs README.md`
-    and switch each hit to `verify_with_key(VerifyingKey::…)`. The `TODO(#6)`
-    markers show where.
-  - Add a test that an `alg = HS256` forgery over an ES256 validator's public key
-    is rejected even when its `moqt` scope would permit the request.
-  - Optionally add a `Token::verify_moqt(key, &options)` convenience that does
-    both checks.
-- **Why it matters:** MoQ publishers and origins are expected to verify with a
-  public key, which is exactly the algorithm-confusion case. MoQ support
-  shouldn't ship in a release without #6.
-
 ### Composite claims (`or` / `and` / `nor` / `crit`)
 
 The draft uses draft-lemmons-cose-composite-claims to bind different `exp` values

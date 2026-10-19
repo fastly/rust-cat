@@ -3,7 +3,7 @@
 use crate::{
     claims::RegisteredClaims,
     constants::moqt_keys,
-    header::{Algorithm, CborValue},
+    header::{Algorithm, CborValue, VerifyingKey},
     moqt::{
         BinMatch, MoqtAction, MoqtClaim, MoqtClaimLabels, MoqtRequest, MoqtRevalidation, MoqtScope,
     },
@@ -11,11 +11,15 @@ use crate::{
     utils::current_timestamp,
     Error,
 };
-use ct_codecs::{Decoder, Hex};
+use ct_codecs::{Base64, Decoder, Hex};
 
 use MoqtAction::*;
 
 const KEY: &[u8] = b"moqt-test-key";
+
+// Same demo ES256 key pair as `src/tests.rs`; DO NOT USE IN PRODUCTION.
+const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg7BOlgwBOMKscTUCaG3RmlSCgUznDdxMn+9Pvoqp4pUOhRANCAARWMcvR3DnF1U15IvgcOyAxr3pJPfOHcF7ESuY+H+ya3LCH03PC1d99/XgN1ldF+wmMxVhY0w9iop10N6tNZDTg";
+const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
 
 fn b(s: &str) -> CborValue {
     CborValue::Bytes(s.as_bytes().to_vec())
@@ -59,8 +63,9 @@ fn signed(builder: TokenBuilder) -> Token {
         .sign(KEY)
         .expect("sign");
     let decoded = Token::from_bytes(&token.to_bytes().expect("encode")).expect("decode");
-    // TODO(#6): switch to `verify_with_key(VerifyingKey::HmacSha256(KEY))` once merged.
-    decoded.verify(KEY).expect("verify");
+    decoded
+        .verify_with_key(VerifyingKey::HmacSha256(KEY))
+        .expect("verify");
     decoded
 }
 
@@ -554,12 +559,8 @@ fn test_float_encoding_uses_shortest_width() {
 
 #[test]
 fn test_moqt_es256_publisher_validates_with_public_key() {
-    use p256::ecdsa::SigningKey;
-    use p256::pkcs8::{EncodePrivateKey, EncodePublicKey};
-
-    let signing_key = SigningKey::random(&mut rand_core::OsRng);
-    let private_der = signing_key.to_pkcs8_der().unwrap();
-    let public_der = signing_key.verifying_key().to_public_key_der().unwrap();
+    let private_key = Base64::decode_to_vec(ES256_PRIVATE_KEY_B64, None).unwrap();
+    let public_key = Base64::decode_to_vec(ES256_PUBLIC_KEY_B64, None).unwrap();
 
     let token = TokenBuilder::new()
         .algorithm(Algorithm::Es256)
@@ -571,13 +572,14 @@ fn test_moqt_es256_publisher_validates_with_public_key() {
         .moqt(MoqtClaim::new(vec![MoqtScope::new([Subscribe])
             .namespace_exact("example.com")
             .namespace_exact("alice")]))
-        .sign(private_der.as_bytes())
+        .sign(&private_key)
         .unwrap();
 
     // The publisher only holds the issuer's public key.
-    // TODO(#6): switch to `verify_with_key(VerifyingKey::Es256(..))` once merged.
     let decoded = Token::from_bytes(&token.to_bytes().unwrap()).unwrap();
-    decoded.verify(public_der.as_bytes()).unwrap();
+    decoded
+        .verify_with_key(VerifyingKey::Es256(&public_key))
+        .unwrap();
 
     let options = VerificationOptions::new()
         .expected_audience("publisher.example.com")
@@ -650,4 +652,24 @@ fn test_moqt_custom_claim_labels() {
             reval: moqt_keys::MOQT_REVAL
         }
     );
+}
+
+#[test]
+fn test_moqt_hmac_forgery_over_public_key_is_rejected() {
+    // An attacker who knows a validator's ES256 public key forges an HS256
+    // token whose MAC uses the public key bytes as the secret, with a scope
+    // that would permit the request. The signature check must reject it
+    // before any scope is consulted.
+    let public_key = Base64::decode_to_vec(ES256_PUBLIC_KEY_B64, None).unwrap();
+    let forged = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .moqt(MoqtClaim::new(vec![MoqtScope::new([Subscribe])]))
+        .sign(&public_key)
+        .unwrap();
+    let decoded = Token::from_bytes(&forged.to_bytes().unwrap()).unwrap();
+
+    assert!(matches!(
+        decoded.verify_with_key(VerifyingKey::Es256(&public_key)),
+        Err(Error::InvalidAlgorithm(_))
+    ));
 }

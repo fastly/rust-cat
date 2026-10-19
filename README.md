@@ -423,7 +423,7 @@ set `VerificationOptions::moqt_claim_labels`, or read a claim with
 ```rust
 use common_access_token::{
     current_timestamp, Algorithm, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation,
-    MoqtScope, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
+    MoqtScope, RegisteredClaims, Token, TokenBuilder, VerificationOptions, VerifyingKey,
 };
 
 let key = b"shared-secret";
@@ -447,7 +447,7 @@ let token = TokenBuilder::new()
 
 // Validator (relay, origin, or publisher): signature first, then the request
 let token = Token::from_bytes(&token.to_bytes().unwrap()).unwrap();
-token.verify(key).unwrap();
+token.verify_with_key(VerifyingKey::HmacSha256(key)).unwrap();
 
 let options = VerificationOptions::new()
     .verify_moqt(true)
@@ -466,7 +466,8 @@ Notes for validators:
   publishers, origins validating relays, and publishers validating a relay's
   SUBSCRIBE all use `MoqtRequest` + `verify_claims`. Publishers and origins
   should verify with an ES256/PS256 public key rather than holding an HMAC
-  secret.
+  secret. Always use `verify_with_key` with a typed `VerifyingKey`, which
+  rejects HMAC forgeries computed over a public key.
 - **Which matches apply.** Setup actions only check that the action is listed.
   Namespace actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) also check the
   namespace. Track actions also check the track, and are denied if no track is

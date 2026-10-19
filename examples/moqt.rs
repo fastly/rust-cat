@@ -16,7 +16,7 @@
 
 use common_access_token::{
     current_timestamp, Algorithm, KeyId, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation,
-    MoqtScope, RegisteredClaims, Token, TokenBuilder, VerificationOptions,
+    MoqtScope, RegisteredClaims, Token, TokenBuilder, VerificationOptions, VerifyingKey,
 };
 use ct_codecs::{Base64, Decoder};
 
@@ -60,8 +60,9 @@ fn edge_relay_validates_subscriber() {
 
     // Relay: verify the signature once per received token...
     let token = Token::from_bytes(&bytes).expect("decode");
-    // TODO(#6): switch to `verify_with_key(VerifyingKey::HmacSha256(HMAC_KEY))`.
-    token.verify(HMAC_KEY).expect("signature");
+    token
+        .verify_with_key(VerifyingKey::HmacSha256(HMAC_KEY))
+        .expect("signature");
 
     // ...then check each action against it.
     let options = |request| {
@@ -161,9 +162,11 @@ fn publisher_validates_relay() {
         .expect("sign");
 
     let token = Token::from_bytes(&token.to_bytes().expect("encode")).expect("decode");
-    // TODO(#6): switch to `verify_with_key(VerifyingKey::Es256(&public_key))`;
-    // until then `verify` is not safe against algorithm confusion.
-    token.verify(&public_key).expect("signature");
+    // Bind the algorithm to the key: a token relabelled to HMAC and MACed
+    // with this public key is rejected.
+    token
+        .verify_with_key(VerifyingKey::Es256(&public_key))
+        .expect("signature");
 
     let options = VerificationOptions::new()
         .expected_audience("origin.example.com")
