@@ -50,7 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this an undersized key would sign and verify normally.
 - `Token::from_bytes` rejects tokens whose COSE structure tag disagrees with
   the protected header's algorithm. A COSE_Mac0 (17) tag with ES256 or PS256,
-  or a COSE_Sign1 (18) tag with HMAC, now fails with `Error::InvalidFormat`.
+  or a COSE_Sign1 (18) tag with HMAC, now fails with the new
+  `Error::StructureTagMismatch { tag, algorithm, expected }`.
   Untagged and CWT-tag-only tokens are accepted as before.
 
 ## [0.2.7] - 2025-11-05

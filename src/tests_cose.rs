@@ -49,7 +49,11 @@ fn test_mac0_tag_with_signature_alg_is_rejected() {
     let bytes = with_structure_tag(token_bytes(Algorithm::Es256), MAC0);
     assert!(matches!(
         Token::from_bytes(&bytes),
-        Err(Error::InvalidFormat(_))
+        Err(Error::StructureTagMismatch {
+            tag: 17,
+            algorithm: Algorithm::Es256,
+            expected: 18,
+        })
     ));
 }
 
@@ -58,7 +62,7 @@ fn test_sign1_tag_with_mac_alg_is_rejected() {
     let bytes = with_structure_tag(token_bytes(Algorithm::HmacSha256), SIGN1);
     assert!(matches!(
         Token::from_bytes(&bytes),
-        Err(Error::InvalidFormat(_))
+        Err(Error::StructureTagMismatch { .. })
     ));
 }
 
@@ -68,7 +72,7 @@ fn test_mismatch_is_rejected_without_cwt_tag() {
     let bytes = with_structure_tag(token_bytes(Algorithm::HmacSha256), SIGN1);
     assert!(matches!(
         Token::from_bytes(&bytes[2..]),
-        Err(Error::InvalidFormat(_))
+        Err(Error::StructureTagMismatch { .. })
     ));
     let bytes = token_bytes(Algorithm::HmacSha256);
     assert!(Token::from_bytes(&bytes[2..]).is_ok());

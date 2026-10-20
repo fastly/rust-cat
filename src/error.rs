@@ -39,6 +39,20 @@ pub enum Error {
     #[error("Signature verification failed. The token's signature does not match the expected signature")]
     SignatureVerification,
 
+    /// The COSE structure tag disagrees with the protected header's algorithm,
+    /// e.g. a COSE_Mac0 (17) token declaring a signature algorithm
+    #[error(
+        "COSE structure tag {tag} does not match algorithm {algorithm:?} (expected tag {expected})"
+    )]
+    StructureTagMismatch {
+        /// The COSE structure tag on the token (17 or 18)
+        tag: u64,
+        /// The algorithm declared in the protected header
+        algorithm: crate::header::Algorithm,
+        /// The tag that algorithm requires
+        expected: u64,
+    },
+
     /// Missing required claim
     #[error("Missing required claim: {0}. The token does not contain a required claim")]
     MissingClaim(String),

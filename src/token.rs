@@ -117,7 +117,7 @@ impl Token {
     /// optionally preceded by the CWT tag (61), as well as untagged input. If a
     /// COSE_Mac0 or COSE_Sign1 tag is present, it must match the class of the
     /// protected header's algorithm (MAC or signature); a mismatch is rejected
-    /// with [`Error::InvalidFormat`].
+    /// with [`Error::StructureTagMismatch`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let mut dec = Decoder::new(bytes);
 
@@ -165,10 +165,11 @@ impl Token {
         // are left as before.
         if let (Some(tag), Some(alg)) = (structure_tag, header.algorithm()) {
             if tag != alg.class().cbor_tag() {
-                return Err(Error::InvalidFormat(format!(
-                    "COSE structure tag {tag} does not match algorithm {alg:?} (expected tag {})",
-                    alg.class().cbor_tag()
-                )));
+                return Err(Error::StructureTagMismatch {
+                    tag,
+                    algorithm: alg,
+                    expected: alg.class().cbor_tag(),
+                });
             }
         }
 
