@@ -216,6 +216,8 @@ pub mod cwt_keys {
 pub mod cose_labels {
     /// Algorithm (used in protected header)
     pub const ALG: i32 = 1;
+    /// Critical header parameters (protected header only; RFC 9052 §3.1)
+    pub const CRIT: i32 = 2;
     /// Key identifier (used in protected or unprotected header)
     pub const KID: i32 = 4;
 }

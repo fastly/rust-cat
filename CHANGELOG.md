@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message — so without this a third party could derive a second valid signature
   for an unchanged token. Requiring low-S makes the signature bytes a stable
   identity for a token.
+- `Token::from_bytes` hardens COSE structure decoding (RFC 9052):
+  - Bytes after the COSE structure, or after the map inside the protected
+    header or payload byte strings, are rejected. Appended data isn't covered
+    by the signature and was silently ignored.
+  - A `crit` header parameter (§3.1) is enforced. It must be a non-empty array
+    in the protected header, and every listed label must be one this library
+    processes (`alg`, `kid`); otherwise decoding fails with the new
+    `Error::UnsupportedCriticalHeader`.
+  - An out-of-range `alg` no longer truncates onto a valid identifier (for
+    example `2^32 + 5` was read as HMAC 256/256). The same fix applies to the
+    `catreplay` value, where `2^32` was read as "replay permitted".
 - PS256 rejects RSA keys whose modulus is smaller than 2048 bits, on both the
   signing and verification paths. Smaller moduli (e.g. 512- or 1024-bit) are too
   weak to be secure — a 512-bit modulus is factorable on commodity hardware —
