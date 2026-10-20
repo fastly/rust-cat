@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `VerifyingKey`, a typed verification key that carries its algorithm
+  (`HmacSha256`, `Es256`, `Ps256`), and `Token::verify_with_key`, which rejects
+  a token whose header `alg` doesn't match the key's algorithm before running
+  any cryptography. `VerifyingKey`'s `Debug` output redacts the key bytes.
 - **ES256** (ECDSA using the P-256 curve and SHA-256) signing and verification
   support, producing/consuming `COSE_Sign1` structures.
 - **PS256** (RSASSA-PSS using SHA-256 and MGF1 with SHA-256) signing and
@@ -37,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Algorithm confusion:** `Token::verify(&[u8])` picked the algorithm from the
+  token's own `alg` header. With ES256/PS256 support, an attacker could forge a
+  token declaring HMAC and MAC it with the verifier's public key bytes, and
+  `verify` accepted it. Use `verify_with_key` with a typed `VerifyingKey`.
+  `verify` is **deprecated**, only accepts HMAC-SHA256, and returns
+  `Error::InvalidAlgorithm` for ES256/PS256; it is still unsafe to call with a
+  public key.
 - ES256 signatures are now produced in canonical "low-S" form, and `verify`
   rejects high-S (non-canonical) ECDSA signatures. ECDSA signatures are
   malleable — for a valid `(r, s)`, the pair `(r, n - s)` verifies over the same
