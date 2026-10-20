@@ -226,7 +226,8 @@ impl Token {
         // Check expiration
         if options.verify_exp {
             if let Some(exp) = self.claims.registered.exp {
-                if now >= exp {
+                // Tolerate clock skew: still valid up to `leeway` seconds past exp
+                if now >= exp.saturating_add(options.leeway) {
                     return Err(Error::Expired);
                 }
             } else if options.require_exp {
@@ -237,7 +238,8 @@ impl Token {
         // Check not before
         if options.verify_nbf {
             if let Some(nbf) = self.claims.registered.nbf {
-                if now < nbf {
+                // Tolerate clock skew: already valid up to `leeway` seconds before nbf
+                if now.saturating_add(options.leeway) < nbf {
                     return Err(Error::NotYetValid);
                 }
             }
@@ -1142,6 +1144,8 @@ pub struct VerificationOptions {
     /// Current time (Unix seconds) for the exp and nbf checks; `None` uses the
     /// system clock
     pub now: Option<u64>,
+    /// Allowed clock skew (seconds) for the exp and nbf checks
+    pub leeway: u64,
     /// Expected issuer
     pub expected_issuer: Option<String>,
     /// Require issuer claim
@@ -1178,6 +1182,7 @@ impl VerificationOptions {
             require_exp: false,
             verify_nbf: true,
             now: None,
+            leeway: 0,
             expected_issuer: None,
             require_iss: false,
             expected_audience: None,
@@ -1219,6 +1224,16 @@ impl VerificationOptions {
     /// or tests, or when the caller already holds a trusted time source.
     pub fn now(mut self, timestamp: u64) -> Self {
         self.now = Some(timestamp);
+        self
+    }
+
+    /// Set the allowed clock skew (seconds) for the exp and nbf checks
+    ///
+    /// A token stays valid until `leeway` seconds after its `exp`, and becomes
+    /// valid `leeway` seconds before its `nbf`, to tolerate small clock
+    /// differences between issuer and verifier. Defaults to 0.
+    pub fn leeway(mut self, seconds: u64) -> Self {
+        self.leeway = seconds;
         self
     }
 

@@ -42,3 +42,36 @@ fn test_system_clock_is_the_default() {
         Err(Error::Expired)
     ));
 }
+
+#[test]
+fn test_leeway_extends_exp_and_nbf_in_the_permissive_direction() {
+    let token = token();
+    let at = |now, leeway| token.verify_claims(&VerificationOptions::new().now(now).leeway(leeway));
+
+    // exp: valid until leeway seconds past exp
+    assert!(at(EXP + 29, 30).is_ok());
+    assert!(matches!(at(EXP + 30, 30), Err(Error::Expired)));
+    // nbf: valid from leeway seconds before nbf
+    assert!(at(NBF - 30, 30).is_ok());
+    assert!(matches!(at(NBF - 31, 30), Err(Error::NotYetValid)));
+    // No leeway by default
+    assert_eq!(VerificationOptions::new().leeway, 0);
+    assert!(matches!(at(EXP, 0), Err(Error::Expired)));
+}
+
+#[test]
+fn test_leeway_saturates() {
+    let token = TokenBuilder::new()
+        .algorithm(Algorithm::HmacSha256)
+        .registered_claims(
+            RegisteredClaims::new()
+                .with_not_before(u64::MAX)
+                .with_expiration(u64::MAX),
+        )
+        .sign(b"clock-test-key")
+        .unwrap();
+    let options = VerificationOptions::new()
+        .now(u64::MAX - 1)
+        .leeway(u64::MAX);
+    assert!(token.verify_claims(&options).is_ok());
+}
