@@ -10,6 +10,7 @@
 //! Claims are used to convey information about the token subject and context, and can be used for
 //! authorization decisions by the token verifier.
 
+use crate::error::Error;
 use crate::header::CborValue;
 use std::collections::BTreeMap;
 
@@ -389,9 +390,55 @@ impl RegisteredClaims {
         map
     }
 
-    /// Extracts registered claims from a claims map.
+    /// Strictly decode registered claims from a claims map.
     ///
-    /// This method is primarily used internally for token decoding.
+    /// Unlike [`RegisteredClaims::from_map`], which skips values of the wrong
+    /// type, this rejects any registered claim that is present but malformed,
+    /// so a claim that would restrict the token can never be silently dropped:
+    ///
+    /// - `iss` and `sub` must be text strings.
+    /// - `aud` must be a text string, or an array of text strings (exposed by
+    ///   [`Token::audiences`](crate::Token::audiences); `aud` here is then `None`).
+    /// - `exp`, `nbf`, and `iat` must be non-negative integer NumericDates.
+    /// - `cti` must be a byte string.
+    ///
+    /// `Token::from_bytes` uses this, and returns
+    /// [`Error::InvalidRegisteredClaim`] on failure.
+    pub fn try_from_map(map: &ClaimsMap) -> Result<Self, Error> {
+        Ok(Self {
+            iss: text_claim(map, keys::ISS, "iss")?,
+            sub: text_claim(map, keys::SUB, "sub")?,
+            aud: match map.get(&keys::AUD) {
+                None => None,
+                Some(CborValue::Text(aud)) => Some(aud.clone()),
+                Some(CborValue::Array(_)) => {
+                    audience_list(map)?;
+                    None
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "aud",
+                        "must be a text string or array of text strings",
+                    ))
+                }
+            },
+            exp: numeric_date(map, keys::EXP, "exp")?,
+            nbf: numeric_date(map, keys::NBF, "nbf")?,
+            iat: numeric_date(map, keys::IAT, "iat")?,
+            cti: match map.get(&keys::CTI) {
+                None => None,
+                Some(CborValue::Bytes(cti)) => Some(cti.clone()),
+                Some(_) => return Err(invalid("cti", "must be a byte string")),
+            },
+        })
+    }
+
+    /// Extracts registered claims from a claims map, skipping any that are
+    /// malformed.
+    ///
+    /// This is lenient: a claim of the wrong type or with an invalid value is
+    /// left as `None`. Use [`RegisteredClaims::try_from_map`] (as
+    /// `Token::from_bytes` does) to reject malformed claims instead.
     ///
     /// # Example
     ///
@@ -422,16 +469,18 @@ impl RegisteredClaims {
             claims.aud = Some(aud.clone());
         }
 
+        // Negative NumericDates are skipped like any other invalid value
+        // (casting would turn exp = -1 into "never expires").
         if let Some(CborValue::Integer(exp)) = map.get(&keys::EXP) {
-            claims.exp = Some(*exp as u64);
+            claims.exp = u64::try_from(*exp).ok();
         }
 
         if let Some(CborValue::Integer(nbf)) = map.get(&keys::NBF) {
-            claims.nbf = Some(*nbf as u64);
+            claims.nbf = u64::try_from(*nbf).ok();
         }
 
         if let Some(CborValue::Integer(iat)) = map.get(&keys::IAT) {
-            claims.iat = Some(*iat as u64);
+            claims.iat = u64::try_from(*iat).ok();
         }
 
         if let Some(CborValue::Bytes(cti)) = map.get(&keys::CTI) {
@@ -707,6 +756,14 @@ impl Claims {
         map
     }
 
+    /// Strictly decode claims from a map, rejecting malformed registered
+    /// claims (see [`RegisteredClaims::try_from_map`])
+    pub fn try_from_map(map: &ClaimsMap) -> Result<Self, Error> {
+        let mut claims = Self::from_map(map);
+        claims.registered = RegisteredClaims::try_from_map(map)?;
+        Ok(claims)
+    }
+
     /// Creates a Claims struct from a claims map.
     ///
     /// This method is primarily used internally for token decoding.
@@ -740,5 +797,154 @@ impl Claims {
         }
 
         Self { registered, custom }
+    }
+}
+
+fn invalid(claim: &str, reason: &str) -> Error {
+    Error::InvalidRegisteredClaim(format!("{claim} {reason}"))
+}
+
+fn text_claim(map: &ClaimsMap, key: i32, name: &str) -> Result<Option<String>, Error> {
+    match map.get(&key) {
+        None => Ok(None),
+        Some(CborValue::Text(s)) => Ok(Some(s.clone())),
+        Some(_) => Err(invalid(name, "must be a text string")),
+    }
+}
+
+/// A NumericDate (RFC 8392 §2): seconds since the Unix epoch, which must not
+/// be negative.
+fn numeric_date(map: &ClaimsMap, key: i32, name: &str) -> Result<Option<u64>, Error> {
+    match map.get(&key) {
+        None => Ok(None),
+        Some(CborValue::Integer(i)) => u64::try_from(*i)
+            .map(Some)
+            .map_err(|_| invalid(name, "must not be negative")),
+        Some(_) => Err(invalid(name, "must be an integer NumericDate")),
+    }
+}
+
+/// The audiences of an array-valued `aud` claim, or `None` if `aud` is absent
+/// or a single text string.
+pub(crate) fn audience_list(map: &ClaimsMap) -> Result<Option<Vec<String>>, Error> {
+    match map.get(&keys::AUD) {
+        Some(CborValue::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                CborValue::Text(aud) => Ok(aud.clone()),
+                _ => Err(invalid("aud", "array must contain only text strings")),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod strict_decoding_tests {
+    use super::keys;
+    use crate::{Algorithm, CborValue, Error, Token, TokenBuilder, VerificationOptions};
+
+    const KEY: &[u8] = b"strict-claims-key";
+
+    /// Sign a token whose registered claim `key` carries `value` verbatim.
+    fn token_bytes_with(key: i32, value: CborValue) -> Vec<u8> {
+        TokenBuilder::new()
+            .algorithm(Algorithm::HmacSha256)
+            .custom_cbor(key, value)
+            .sign(KEY)
+            .unwrap()
+            .to_bytes()
+            .unwrap()
+    }
+
+    fn rejects(key: i32, value: CborValue) -> bool {
+        matches!(
+            Token::from_bytes(&token_bytes_with(key, value)),
+            Err(Error::InvalidRegisteredClaim(_))
+        )
+    }
+
+    #[test]
+    fn test_negative_numeric_dates_are_rejected() {
+        for key in [keys::EXP, keys::NBF, keys::IAT] {
+            assert!(rejects(key, CborValue::Integer(-1)), "key {key}");
+        }
+    }
+
+    #[test]
+    fn test_non_integer_numeric_dates_are_rejected() {
+        for key in [keys::EXP, keys::NBF, keys::IAT] {
+            assert!(
+                rejects(key, CborValue::Text("2000000000".into())),
+                "key {key}"
+            );
+            assert!(rejects(key, CborValue::Bytes(vec![1])), "key {key}");
+            assert!(rejects(key, CborValue::Null), "key {key}");
+        }
+    }
+
+    #[test]
+    fn test_text_claims_of_wrong_type_are_rejected() {
+        for key in [keys::ISS, keys::SUB] {
+            assert!(
+                rejects(key, CborValue::Bytes(b"issuer".to_vec())),
+                "key {key}"
+            );
+            assert!(rejects(key, CborValue::Integer(1)), "key {key}");
+        }
+        assert!(rejects(keys::AUD, CborValue::Bytes(b"aud".to_vec())));
+        assert!(rejects(
+            keys::AUD,
+            CborValue::Array(vec![CborValue::Text("ok".into()), CborValue::Integer(1)])
+        ));
+        assert!(rejects(keys::CTI, CborValue::Integer(7)));
+    }
+
+    #[test]
+    fn test_well_formed_claims_still_decode() {
+        let token = Token::from_bytes(&token_bytes_with(
+            keys::EXP,
+            CborValue::Integer(4_000_000_000),
+        ))
+        .unwrap();
+        assert_eq!(token.expiration(), Some(4_000_000_000));
+        let token = Token::from_bytes(&token_bytes_with(
+            keys::ISS,
+            CborValue::Text("issuer".into()),
+        ))
+        .unwrap();
+        assert_eq!(token.issuer(), Some("issuer"));
+    }
+
+    #[test]
+    fn test_array_audience_is_matched_by_any_entry() {
+        let token = Token::from_bytes(&token_bytes_with(
+            keys::AUD,
+            CborValue::Array(vec![
+                CborValue::Text("relay-a".into()),
+                CborValue::Text("relay-b".into()),
+            ]),
+        ))
+        .unwrap();
+        assert_eq!(token.audience(), None);
+        assert_eq!(token.audiences(), vec!["relay-a", "relay-b"]);
+
+        let check =
+            |aud: &str| token.verify_claims(&VerificationOptions::new().expected_audience(aud));
+        assert!(check("relay-b").is_ok());
+        // Previously an array aud was dropped, so any expected audience passed
+        assert!(matches!(check("relay-c"), Err(Error::InvalidAudience)));
+    }
+
+    #[test]
+    fn test_lenient_from_map_is_unchanged() {
+        let mut map = super::ClaimsMap::new();
+        map.insert(keys::EXP, CborValue::Integer(-1));
+        map.insert(keys::ISS, CborValue::Bytes(b"x".to_vec()));
+        let claims = super::RegisteredClaims::from_map(&map);
+        assert_eq!(claims.exp, None);
+        assert_eq!(claims.iss, None);
+        assert!(super::RegisteredClaims::try_from_map(&map).is_err());
     }
 }

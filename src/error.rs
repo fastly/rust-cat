@@ -63,6 +63,11 @@ pub enum Error {
     #[error("Invalid claim value: {0}")]
     InvalidClaimValue(String),
 
+    /// A registered claim (RFC 8392 §3.1) is present but has the wrong type or
+    /// an invalid value
+    #[error("Invalid registered claim: {0}")]
+    InvalidRegisteredClaim(String),
+
     /// Invalid URI claim
     #[error("Invalid URI claim: {0}")]
     InvalidUriClaim(String),
