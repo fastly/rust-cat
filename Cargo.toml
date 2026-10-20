@@ -23,11 +23,18 @@ url = "2.5.8"
 regex = "1.13.1"
 # ES256 (ECDSA P-256 + SHA-256, COSE alg -7)
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-# PS256 (RSASSA-PSS + SHA-256, COSE alg -37)
-rsa = { version = "0.9", features = ["sha2"] }
-sha2 = "0.10"
+# PS256 (RSASSA-PSS + SHA-256, COSE alg -37), behind the `ps256` feature
+rsa = { version = "0.9.10", features = ["sha2"], optional = true }
+sha2 = { version = "0.10", optional = true }
 # RNG for PSS salt generation (WASM-friendly via getrandom)
-rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core = { version = "0.6", features = ["getrandom"], optional = true }
+
+[features]
+default = ["ps256"]
+# PS256 (RSASSA-PSS) signing and verification. Pulls in the `rsa` crate, which
+# has an unfixed private-key timing advisory (RUSTSEC-2023-0071); consumers that
+# don't need PS256 can disable default features to drop it.
+ps256 = ["dep:rsa", "dep:sha2", "dep:rand_core"]
 
 [dev-dependencies]
 # Statistical benchmarking harness (`cargo bench`).
@@ -36,3 +43,12 @@ criterion = "0.5"
 [[bench]]
 name = "cat"
 harness = false
+required-features = ["ps256"]
+
+[[example]]
+name = "asymmetric_signing"
+required-features = ["ps256"]
+
+[[example]]
+name = "sample_es256_ps256_tokens"
+required-features = ["ps256"]

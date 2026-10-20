@@ -1680,8 +1680,10 @@ const ES256_PRIVATE_KEY_B64: &str = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawI
 /// ES256 SPKI DER public key (base64-encoded), matching the private key above.
 const ES256_PUBLIC_KEY_B64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVjHL0dw5xdVNeSL4HDsgMa96ST3zh3BexErmPh/smtywh9NzwtXfff14DdZXRfsJjMVYWNMPYqKddDerTWQ04A==";
 
+#[cfg(feature = "ps256")]
 /// PS256 PKCS#8 DER private key (base64-encoded).
 const PS256_PRIVATE_KEY_B64: &str = "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCHjA5iauwvo2sRB529iV1c+p+WuGFzk5EUGFFLYoIHxAwo/rSmZ2/D00epwb4WzOxA4c8+1QA+0rZIN35Fti9Wiunt0b1DgC0tuSglNzpEE5gjhTDcAWZOBPOCMt9pKEuuQC4eqBRxPoG5Y14dVi46/aQOQSqU5I0T3cbeLliTzjXkrvdqySFXMGpM9/I469SZRxZbDgB8wUcB2nTIuwOokjN/Vp+BpMM5QmR66J6aFNi8LqCmQv3grUI1kM1fqrC3az/YcyXcDvjinagyXsGYgW2ZpXIf2760UXv/bASAOO01sgI8zxbIDdG6Vd+7iPhr4b/v6QIj6rpuURFfns2LAgMBAAECggEAH9CdXbdYCZRzYHNnsGGqEtVWmQNdCEo2Lr/IcQfFmnoHGqYyE67Kmm2gb/VkHyjpOQ9nXAmVvakqlMfFsSoicU84uhPVNx9CO22uwRF18R2iQ5ATGEiR0TUzTLeRHbcSEGvLB3IPHkd8Hl327K7aOglntNrR2lHM1UFkWKkLLGHObPoLBSTQLjX5JkvtpUuBgnPVlfBUc5al9+CH+m/SiC4BvVWo4hiHEKCQgMIQ/Dh8UtS9Vk91FIizqKpqBXE6+PNmAnn9ZwRjZoRNBSLn0paAyiEXXdr5rV8zeYU0ktY40J9qWEFOJmTYII4pUK1U8tukrQ0w4LUm17f8zMkufQKBgQC7MGcSrbFWVjlEwA760sG6NKOZb5sL+2etIVAJyfSoGrwr8H4aQA1WFP+pmmlCWsLZj8qfTYSyocwfT/p9aY9Na7ftyks+q1QSsDF+D7frgxmITJeCSwiPa7jnOTrmReqAEOyPn8IlytHIhJbaPxzDxPf572QIAIBgsWhdygn21QKBgQC5X9agS0u2Joypz36ZIilbgbtgmSvFAE/22U0il+3GgXQbjmxPCip1UZm1cBgmLhq12bxU1xYxJpGVPWhEsmkIrOkEfNf/RYlSvVLzbuZLQxeB1g5FDrFb1EbaegrFznv/rFonyXMeRyJ7PHtDttfN5jxNTxTiV3BQ4uobgsai3wKBgFEiW6q26mSXnt7zuApzi1CgPEDnJPb+kyNxivWTOZ4baHBLHv1VwfILy/zBVtpR6J7QOmzt9pROmOEBk3sEY/6Ur/Y7dn3FWP14rRsMyRUlj82KFSl+SEmR0WU3YxYoO8oii8Z84nPrAx68iX4zWM5p82m7n0nwnbRLcQcl6Ue5AoGACjVN42viEnjS/DLx/MrVzjU5tVsZ/vJCdQyIY+RL8seENlREgKHFrso8lbJDki6tx9/isCVcEn7WO4qzKD1O7WxgNKAPYP5aTpUgcUllIzXhoIPCK2lguPbapANefoAdcfnyyQgd78fpDTJKc3MpNSx9m6BEPSalh77HN5afC68CgYBSHR2vz1GuUzHSgU+3xKqGSc+jlroetJ1dC5913Z+9eawW7QrRfmSod+JfEiJSw8eS+5/rGYjKihMtNPyqzadRvZtp0QGZrrm1k1/vqqeeH5Uq6AgH/2Djql4tUvC3gmgpHjY7RyPDv6v+u+L9C6MP0Nu5vVfQwpAmX9bsjn/Tjw==";
+#[cfg(feature = "ps256")]
 /// PS256 SPKI DER public key (base64-encoded), matching the private key above.
 const PS256_PUBLIC_KEY_B64: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAh4wOYmrsL6NrEQedvYldXPqflrhhc5ORFBhRS2KCB8QMKP60pmdvw9NHqcG+FszsQOHPPtUAPtK2SDd+RbYvVorp7dG9Q4AtLbkoJTc6RBOYI4Uw3AFmTgTzgjLfaShLrkAuHqgUcT6BuWNeHVYuOv2kDkEqlOSNE93G3i5Yk8415K73askhVzBqTPfyOOvUmUcWWw4AfMFHAdp0yLsDqJIzf1afgaTDOUJkeuiemhTYvC6gpkL94K1CNZDNX6qwt2s/2HMl3A744p2oMl7BmIFtmaVyH9u+tFF7/2wEgDjtNbICPM8WyA3RulXfu4j4a+G/7+kCI+q6blERX57NiwIDAQAB";
 
@@ -1693,6 +1695,7 @@ fn es256_keys() -> (Vec<u8>, Vec<u8>) {
     )
 }
 
+#[cfg(feature = "ps256")]
 fn ps256_keys() -> (Vec<u8>, Vec<u8>) {
     use ct_codecs::{Base64, Decoder};
     (
@@ -1755,6 +1758,7 @@ fn test_es256_sign_and_verify() {
     assert_eq!(decoded.get_custom_int(102), Some(12345));
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_sign_and_verify() {
     let (private_key, public_key) = ps256_keys();
@@ -1804,6 +1808,7 @@ fn test_es256_uses_cose_sign1_tags() {
     );
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_uses_cose_sign1_tags() {
     let (private_key, _public_key) = ps256_keys();
@@ -1845,25 +1850,29 @@ fn test_es256_wrong_key_fails() {
         "Verification should fail with a non-matching public key"
     );
 
-    // Verifying against an unrelated but valid PS256 public key must also fail.
-    // Presenting it as an ES256 key (matching the token's declared algorithm)
-    // fails the cryptographic check; presenting it as a PS256 key fails the
-    // algorithm-binding check. Both must be rejected.
-    let (_ps_priv, ps_pub) = ps256_keys();
-    assert!(
-        decoded
-            .verify_with_key(VerifyingKey::Es256(&ps_pub))
-            .is_err(),
-        "ES256 token should not verify against an RSA public key"
-    );
-    assert!(
-        decoded
-            .verify_with_key(VerifyingKey::Ps256(&ps_pub))
-            .is_err(),
-        "ES256 token must be rejected when the key is for a different algorithm"
-    );
+    #[cfg(feature = "ps256")]
+    {
+        // Verifying against an unrelated but valid PS256 public key must also fail.
+        // Presenting it as an ES256 key (matching the token's declared algorithm)
+        // fails the cryptographic check; presenting it as a PS256 key fails the
+        // algorithm-binding check. Both must be rejected.
+        let (_ps_priv, ps_pub) = ps256_keys();
+        assert!(
+            decoded
+                .verify_with_key(VerifyingKey::Es256(&ps_pub))
+                .is_err(),
+            "ES256 token should not verify against an RSA public key"
+        );
+        assert!(
+            decoded
+                .verify_with_key(VerifyingKey::Ps256(&ps_pub))
+                .is_err(),
+            "ES256 token must be rejected when the key is for a different algorithm"
+        );
+    }
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_wrong_key_fails() {
     let (private_key, _public_key) = ps256_keys();
@@ -1921,6 +1930,7 @@ fn test_es256_tampered_payload_fails() {
     );
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_signatures_are_randomized() {
     // PSS uses a random salt, so two signatures over the same input differ,
@@ -2013,6 +2023,29 @@ fn test_ps256_signatures_are_randomized() {
         .expect("token_b should verify");
 }
 
+#[cfg(feature = "ps256")]
+#[test]
+fn test_ps256_requires_rfc8230_salt_length() {
+    // RFC 8230 §2: PS256 uses a salt as long as the SHA-256 output (32 bytes).
+    // Signatures with any other salt length are refused.
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::signature::{RandomizedSigner, SignatureEncoding};
+
+    let (private_key, public_key) = ps256_keys();
+    let rsa_key = rsa::RsaPrivateKey::from_pkcs8_der(&private_key).unwrap();
+    let data = b"ps256 salt length";
+    for (salt_len, accepted) in [(32, true), (0, false), (20, false), (64, false)] {
+        let signer =
+            rsa::pss::SigningKey::<sha2::Sha256>::new_with_salt_len(rsa_key.clone(), salt_len);
+        let signature = signer.sign_with_rng(&mut rand_core::OsRng, data).to_vec();
+        assert_eq!(
+            crate::utils::verify_ps256(&public_key, data, &signature).is_ok(),
+            accepted,
+            "salt length {salt_len}"
+        );
+    }
+}
+
 #[test]
 fn test_es256_invalid_private_key_errors() {
     let result = TokenBuilder::new()
@@ -2025,12 +2058,15 @@ fn test_es256_invalid_private_key_errors() {
     );
 }
 
+#[cfg(feature = "ps256")]
 /// A valid 1024-bit RSA key pair (PKCS#8 / SPKI DER, base64). Used only to
 /// confirm the PS256 minimum-key-size floor rejects undersized keys; 1024-bit
 /// RSA is below the 2048-bit minimum the crate enforces.
 const PS256_1024_PRIVATE_KEY_B64: &str = "MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKvHWxROqV0XWK/d7kjK0u0SZFP5mkAQlw+f+DSF2Lb0GR6nSpzPsgz72KcBnKTuIjKBjpCziE96F4kY60ads16ZdGnjpaZKk3ggWnMF0Q7njDUTedYcyZykGpJmYF/XhAsTn4yRnJBjc2mzHLeMYGHZgmwgf/AHC104uLFbShsbAgMBAAECgYEAhvsuPLTbLQVtcTSpS5XlTNkI8VvPs8vViDeh6FPMyWbiXk4CuVoThVRZGFKR7qAZSyq3BkmtMRa1a8ujBWhiSwgcelL2KSXiY60hYzlKkmBnYMwDpDfUxlfTgw2nC5ufb4HUd/W/p2NJdmGI0/5td+A9AhIpsg/7ZlHbK4QYisECQQDUuh2GTmiPl3c5Unmby3XXvnDVMNCTKtAk8mf9mNL8AIq2D9tqgX0PsVczKqzjtYVVlQD50lH95LKfTr3aoAQLAkEAzrjVqxNva8SMabIAvPXNLvk80IgnLKgLTFVbtOBHrUH3muoRKbFQvC0UwvqxkjNszpakX0eo3UTmIGQMdgQfMQJAK+udSuyHZBY2tGwV1ZfFZdzY+PtSJQBy5x3xYIecEBGgkgRmHfBMPOA1i8fk2ELTG59fCzVkXlJImuGsCyZ8jwJABXkBNxk5nunCKd4rhNUhDHhOstqX5ue//NJZri0t2Jlhe7lsoOTv1TuATDUk1FEGNWXpjhgwkUMMsJjVd55eUQJBALD636EfXmesRUVTo3dGBreONSD9kob2x7XckJFBBFAXGV2LLbEmjZTC6e9OVpPb5fEE0hMq029VrSwva5mqyuc=";
+#[cfg(feature = "ps256")]
 const PS256_1024_PUBLIC_KEY_B64: &str = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCrx1sUTqldF1iv3e5IytLtEmRT+ZpAEJcPn/g0hdi29Bkep0qcz7IM+9inAZyk7iIygY6Qs4hPeheJGOtGnbNemXRp46WmSpN4IFpzBdEO54w1E3nWHMmcpBqSZmBf14QLE5+MkZyQY3Npsxy3jGBh2YJsIH/wBwtdOLixW0obGwIDAQAB";
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_undersized_key_is_rejected_on_sign() {
     use ct_codecs::{Base64, Decoder};
@@ -2048,6 +2084,7 @@ fn test_ps256_undersized_key_is_rejected_on_sign() {
     );
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_undersized_key_is_rejected_on_verify() {
     // A signature produced directly by the low-level helper would also be
@@ -2065,6 +2102,7 @@ fn test_ps256_undersized_key_is_rejected_on_verify() {
     );
 }
 
+#[cfg(feature = "ps256")]
 #[test]
 fn test_ps256_invalid_private_key_errors() {
     let result = TokenBuilder::new()
@@ -2371,4 +2409,25 @@ fn test_deprecated_verify_still_works_for_hmac() {
     decoded
         .verify_with_key(VerifyingKey::HmacSha256(key))
         .expect("HMAC verify_with_key should succeed");
+}
+
+#[cfg(not(feature = "ps256"))]
+#[test]
+fn test_ps256_without_feature_is_rejected() {
+    let sign = TokenBuilder::new()
+        .algorithm(Algorithm::Ps256)
+        .custom_int(100, 1)
+        .sign(b"not-an-rsa-key");
+    assert!(matches!(sign, Err(crate::Error::InvalidAlgorithm(_))));
+
+    // A token declaring PS256 cannot be verified either
+    let token = Token::new(
+        crate::header::Header::new().with_algorithm(Algorithm::Ps256),
+        crate::claims::Claims::new(),
+        vec![0u8; 256],
+    );
+    assert!(matches!(
+        token.verify_with_key(VerifyingKey::Ps256(b"not-an-rsa-key")),
+        Err(crate::Error::InvalidAlgorithm(_))
+    ));
 }

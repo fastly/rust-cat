@@ -20,11 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Algorithm::Es256` and `Algorithm::Ps256` variants, plus their COSE algorithm
   identifiers (`-7` and `-37`).
 - `Error::InvalidKey` for malformed DER key material.
+- `ps256` cargo feature, enabled by default, gating PS256 and its `rsa`, `sha2`,
+  and `rand_core` dependencies. `rsa` has an unfixed timing advisory
+  (RUSTSEC-2023-0071), so consumers that don't need PS256 can set
+  `default-features = false`. Without the feature, PS256 signing and
+  verification return `Error::InvalidAlgorithm`.
 - `examples/asymmetric_signing.rs` and `examples/sample_es256_ps256_tokens.rs`
   demonstrating the new asymmetric algorithms and key formats.
 
 ### Changed
 
+- PS256 signing and verification set the RFC 8230 §2 salt length (32 bytes)
+  explicitly; signatures with any other salt length are refused. The minimum
+  `rsa` version is now 0.9.10.
 - **BREAKING:** `Algorithm` and `Error` are now `#[non_exhaustive]`. Downstream
   `match` expressions over either enum must include a wildcard arm. This is a
   one-time break that allows future variants (additional algorithms or error
