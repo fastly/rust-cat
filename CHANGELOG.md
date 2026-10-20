@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `MoqtAction` codes, and `MoqtRequest`. Parsing is strict, and matching is
     bytewise against Full Track Names.
   - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
+  - `MoqtScope::matches_name`, the action-independent name matcher that
+    `permits` uses, for re-checking namespaces and tracks against a scope.
   - `Token::moqt_claim` and `Token::moqt_reval`.
   - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation,
     moqt_claim_labels}`. `MoqtClaimLabels` overrides the provisional claim

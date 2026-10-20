@@ -673,3 +673,34 @@ fn test_moqt_hmac_forgery_over_public_key_is_rejected() {
         Err(Error::InvalidAlgorithm(_))
     ));
 }
+
+#[test]
+fn test_moqt_matches_name_ignores_actions() {
+    let scope = MoqtScope::new([PublishNamespace, Publish])
+        .namespace_exact("example.com")
+        .namespace_prefix("user-")
+        .namespace_end()
+        .track_suffix(".mp4");
+
+    // Names only: actions are not consulted
+    assert!(scope.matches_name(&["example.com", "user-alice"], Some(b"cam.mp4".as_slice())));
+    assert!(!scope.matches_name(&["example.com", "user-alice"], Some(b"cam.ts".as_slice())));
+    // Namespace only when no track is given
+    assert!(scope.matches_name(&["example.com", "user-alice"], None));
+    // Trailing nil pins the length; shorter namespaces never match
+    assert!(!scope.matches_name(&["example.com", "user-alice", "x"], None));
+    assert!(!scope.matches_name(&["example.com"], None));
+    assert!(!scope.matches_name(&["example.com", "USER-alice"], None));
+
+    // Same answers as permits() for an action the scope lists
+    for (ns, name) in [
+        (["example.com", "user-alice"], "cam.mp4"),
+        (["example.com", "user-alice"], "cam.ts"),
+        (["example.com", "admin"], "cam.mp4"),
+    ] {
+        assert_eq!(
+            scope.matches_name(&ns, Some(name.as_bytes())),
+            scope.permits(&track(Publish, &ns, name))
+        );
+    }
+}

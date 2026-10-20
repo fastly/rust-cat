@@ -305,34 +305,46 @@ impl MoqtScope {
             return false;
         }
 
-        let target = request.action.target();
-        if target == MoqtTarget::Session {
-            return true;
+        match request.action.target() {
+            MoqtTarget::Session => true,
+            MoqtTarget::Namespace => self.matches_name(&request.namespace, None),
+            // A track action with no track name is never permitted
+            MoqtTarget::Track => request
+                .track
+                .as_deref()
+                .is_some_and(|track| self.matches_name(&request.namespace, Some(track))),
         }
+    }
 
-        let ns = &request.namespace;
-        if ns.len() < self.namespace.len()
-            || (self.namespace_end && ns.len() != self.namespace.len())
+    /// Whether this scope's name matches cover a namespace and optional track,
+    /// regardless of its actions
+    ///
+    /// This is the matcher [`MoqtScope::permits`] uses. It applies each
+    /// namespace field match, the trailing-`nil` length pin, and, when `track`
+    /// is `Some`, the track match. With `track = None` only the namespace is
+    /// checked, as for namespace actions. A namespace with fewer fields than
+    /// the scope's namespace match never matches.
+    ///
+    /// Use it to re-check names against scopes already selected by action,
+    /// for example each track routed to a publisher after PUBLISH_NAMESPACE,
+    /// or namespaces returned for SUBSCRIBE_NAMESPACE discovery.
+    pub fn matches_name<N: AsRef<[u8]>>(&self, namespace: &[N], track: Option<&[u8]>) -> bool {
+        if namespace.len() < self.namespace.len()
+            || (self.namespace_end && namespace.len() != self.namespace.len())
         {
             return false;
         }
         if !self
             .namespace
             .iter()
-            .zip(ns)
-            .all(|(m, field)| m.matches(field))
+            .zip(namespace)
+            .all(|(m, field)| m.matches(field.as_ref()))
         {
             return false;
         }
-
-        if target == MoqtTarget::Namespace {
-            return true;
-        }
-
-        match (&self.track, &request.track) {
-            (_, None) => false,
-            (None, Some(_)) => true,
+        match (&self.track, track) {
             (Some(m), Some(track)) => m.matches(track),
+            _ => true,
         }
     }
 
