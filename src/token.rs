@@ -3,7 +3,9 @@
 use crate::claims::{Claims, ClaimsMap, RegisteredClaims};
 use crate::constants::tprint_params;
 use crate::error::Error;
-use crate::header::{Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId, VerifyingKey};
+use crate::header::{
+    labels, Algorithm, AlgorithmClass, CborValue, Header, HeaderMap, KeyId, VerifyingKey,
+};
 use crate::utils::{
     compute_es256, compute_hmac_sha256, compute_ps256, current_timestamp, verify_es256,
     verify_hmac_sha256, verify_ps256,
@@ -151,6 +153,7 @@ impl Token {
             protected,
             unprotected,
         };
+        check_critical_headers(&header)?;
 
         // 3. Payload
         let claims_bytes = dec.bytes()?;
@@ -163,6 +166,15 @@ impl Token {
 
         // 4. Signature
         let signature = dec.bytes()?.to_vec();
+
+        // Nothing may follow the COSE structure: appended bytes are not
+        // covered by the signature and would otherwise be silently ignored.
+        if dec.position() != bytes.len() {
+            return Err(Error::InvalidFormat(format!(
+                "{} trailing bytes after the COSE structure",
+                bytes.len() - dec.position()
+            )));
+        }
 
         Ok(Self {
             header,
@@ -655,7 +667,9 @@ impl Token {
 
         // Get the replay protection value
         let replay_value = match catreplay_claim {
-            CborValue::Integer(value) => *value as i32,
+            CborValue::Integer(value) => i32::try_from(*value).map_err(|_| {
+                Error::InvalidClaimValue(format!("Invalid CATREPLAY value: {value}"))
+            })?,
             _ => {
                 return Err(Error::InvalidClaimValue(
                     "CATREPLAY claim is not an integer".to_string(),
@@ -1647,9 +1661,63 @@ fn encode_map_direct(map: &HeaderMap, enc: &mut Encoder<&mut Vec<u8>>) -> Result
     Ok(())
 }
 
+/// Decode a map that must fill `bytes` exactly (a bstr-wrapped protected
+/// header or payload); trailing data inside the bstr is rejected.
 fn decode_map(bytes: &[u8]) -> Result<HeaderMap, Error> {
     let mut dec = Decoder::new(bytes);
-    decode_map_direct(&mut dec)
+    let map = decode_map_direct(&mut dec)?;
+    if dec.position() != bytes.len() {
+        return Err(Error::InvalidFormat(format!(
+            "{} trailing bytes after encoded map",
+            bytes.len() - dec.position()
+        )));
+    }
+    Ok(map)
+}
+
+/// Header parameters this library processes, and so may be marked critical.
+const UNDERSTOOD_HEADER_PARAMETERS: [i32; 2] = [labels::ALG, labels::KID];
+
+/// Enforce COSE `crit` (RFC 9052 §3.1): it may only appear in the protected
+/// header, must be a non-empty array of labels, and every label it lists must
+/// be one this library understands. Unknown critical parameters are rejected.
+fn check_critical_headers(header: &Header) -> Result<(), Error> {
+    if header.unprotected.contains_key(&labels::CRIT) {
+        return Err(Error::UnsupportedCriticalHeader(
+            "crit must be in the protected header".to_string(),
+        ));
+    }
+    let crit = match header.protected.get(&labels::CRIT) {
+        None => return Ok(()),
+        Some(CborValue::Array(crit)) if !crit.is_empty() => crit,
+        Some(_) => {
+            return Err(Error::UnsupportedCriticalHeader(
+                "crit must be a non-empty array of labels".to_string(),
+            ))
+        }
+    };
+    for label in crit {
+        match label {
+            CborValue::Integer(l)
+                if i32::try_from(*l).is_ok_and(|l| UNDERSTOOD_HEADER_PARAMETERS.contains(&l)) => {}
+            CborValue::Integer(l) => {
+                return Err(Error::UnsupportedCriticalHeader(format!(
+                    "header parameter {l} is not understood"
+                )))
+            }
+            CborValue::Text(l) => {
+                return Err(Error::UnsupportedCriticalHeader(format!(
+                    "header parameter \"{l}\" is not understood"
+                )))
+            }
+            _ => {
+                return Err(Error::UnsupportedCriticalHeader(
+                    "crit labels must be integers or text".to_string(),
+                ))
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Decode a CBOR array
@@ -1777,4 +1845,153 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
     }
 
     Ok(map)
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+    use crate::utils::compute_hmac_sha256;
+
+    const KEY: &[u8] = b"cose-hardening-key";
+
+    /// Build a tagged COSE_Mac0 token, MACed with `KEY`, from raw parts.
+    fn mac0(protected: &HeaderMap, unprotected: &HeaderMap, payload: &[u8]) -> Vec<u8> {
+        let protected = encode_map(protected).unwrap();
+        let mut input = Vec::new();
+        let mut enc = Encoder::new(&mut input);
+        enc.array(4).unwrap();
+        enc.str("MAC0").unwrap();
+        enc.bytes(&protected).unwrap();
+        enc.bytes(&[]).unwrap();
+        enc.bytes(payload).unwrap();
+        let mac = compute_hmac_sha256(KEY, &input);
+
+        let mut out = Vec::new();
+        let mut enc = Encoder::new(&mut out);
+        enc.tag(minicbor::data::Tag::new(61)).unwrap();
+        enc.tag(minicbor::data::Tag::new(17)).unwrap();
+        enc.array(4).unwrap();
+        enc.bytes(&protected).unwrap();
+        encode_map_direct(unprotected, &mut enc).unwrap();
+        enc.bytes(payload).unwrap();
+        enc.bytes(&mac).unwrap();
+        out
+    }
+
+    fn hs256_header() -> HeaderMap {
+        HeaderMap::from([(labels::ALG, CborValue::Integer(5))])
+    }
+
+    fn empty_payload() -> Vec<u8> {
+        encode_map(&HeaderMap::new()).unwrap()
+    }
+
+    fn verify(bytes: &[u8]) -> Result<(), Error> {
+        Token::from_bytes(bytes)?.verify_with_key(VerifyingKey::HmacSha256(KEY))
+    }
+
+    #[test]
+    fn test_well_formed_token_verifies() {
+        assert!(verify(&mac0(&hs256_header(), &HeaderMap::new(), &empty_payload())).is_ok());
+    }
+
+    #[test]
+    fn test_trailing_bytes_after_structure_are_rejected() {
+        let mut bytes = mac0(&hs256_header(), &HeaderMap::new(), &empty_payload());
+        bytes.extend_from_slice(b"junk");
+        assert!(matches!(
+            Token::from_bytes(&bytes),
+            Err(Error::InvalidFormat(_))
+        ));
+    }
+
+    #[test]
+    fn test_trailing_bytes_inside_payload_are_rejected() {
+        let mut payload = empty_payload();
+        payload.push(0x00);
+        let bytes = mac0(&hs256_header(), &HeaderMap::new(), &payload);
+        assert!(matches!(
+            Token::from_bytes(&bytes),
+            Err(Error::InvalidFormat(_))
+        ));
+    }
+
+    #[test]
+    fn test_out_of_range_alg_does_not_alias_hmac() {
+        // 2^32 + 5 truncates to 5 (HMAC 256/256) under an `as i32` cast
+        let protected = HeaderMap::from([(labels::ALG, CborValue::Integer((1 << 32) + 5))]);
+        let bytes = mac0(&protected, &HeaderMap::new(), &empty_payload());
+        let token = Token::from_bytes(&bytes).unwrap();
+        assert_eq!(token.header.algorithm(), None);
+        assert!(verify(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_understood_critical_parameters_are_accepted() {
+        let mut protected = hs256_header();
+        protected.insert(
+            labels::CRIT,
+            CborValue::Array(vec![CborValue::Integer(labels::ALG as i64)]),
+        );
+        assert!(verify(&mac0(&protected, &HeaderMap::new(), &empty_payload())).is_ok());
+    }
+
+    #[test]
+    fn test_unknown_critical_parameter_is_rejected() {
+        for label in [CborValue::Integer(99), CborValue::Text("ext".into())] {
+            let mut protected = hs256_header();
+            protected.insert(99, CborValue::Integer(1));
+            protected.insert(labels::CRIT, CborValue::Array(vec![label]));
+            let bytes = mac0(&protected, &HeaderMap::new(), &empty_payload());
+            assert!(matches!(
+                Token::from_bytes(&bytes),
+                Err(Error::UnsupportedCriticalHeader(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn test_malformed_or_unprotected_crit_is_rejected() {
+        let malformed = [
+            CborValue::Array(vec![]),
+            CborValue::Integer(1),
+            CborValue::Array(vec![CborValue::Null]),
+        ];
+        for crit in malformed {
+            let mut protected = hs256_header();
+            protected.insert(labels::CRIT, crit);
+            let bytes = mac0(&protected, &HeaderMap::new(), &empty_payload());
+            assert!(matches!(
+                Token::from_bytes(&bytes),
+                Err(Error::UnsupportedCriticalHeader(_))
+            ));
+        }
+
+        let unprotected = HeaderMap::from([(
+            labels::CRIT,
+            CborValue::Array(vec![CborValue::Integer(labels::ALG as i64)]),
+        )]);
+        let bytes = mac0(&hs256_header(), &unprotected, &empty_payload());
+        assert!(matches!(
+            Token::from_bytes(&bytes),
+            Err(Error::UnsupportedCriticalHeader(_))
+        ));
+    }
+
+    #[test]
+    fn test_out_of_range_catreplay_does_not_alias_permitted() {
+        // 2^32 truncates to 0 (replay permitted) under an `as i32` cast
+        let token = TokenBuilder::new()
+            .algorithm(Algorithm::HmacSha256)
+            .custom_int(crate::constants::cat_keys::CATREPLAY, 1 << 32)
+            .sign(KEY)
+            .unwrap();
+        let options = VerificationOptions::new()
+            .verify_catreplay(true)
+            .token_seen_before(true);
+        assert!(matches!(
+            token.verify_claims(&options),
+            Err(Error::InvalidClaimValue(_))
+        ));
+    }
 }

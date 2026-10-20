@@ -31,6 +31,11 @@ pub enum Error {
     #[error("Invalid algorithm: {0}")]
     InvalidAlgorithm(String),
 
+    /// A critical header parameter (COSE `crit`, RFC 9052 §3.1) is malformed
+    /// or not understood by this library
+    #[error("Unsupported critical header parameter: {0}")]
+    UnsupportedCriticalHeader(String),
+
     /// Invalid cryptographic key
     #[error("Invalid key: {0}")]
     InvalidKey(String),

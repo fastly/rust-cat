@@ -314,6 +314,8 @@ pub mod labels {
 
     /// Algorithm (used in protected header)
     pub const ALG: i32 = cose_labels::ALG;
+    /// Critical header parameters (protected header only)
+    pub const CRIT: i32 = cose_labels::CRIT;
     /// Key identifier (used in protected or unprotected header)
     pub const KID: i32 = cose_labels::KID;
 }
@@ -457,7 +459,10 @@ impl Header {
     /// ```
     pub fn algorithm(&self) -> Option<Algorithm> {
         if let Some(CborValue::Integer(alg)) = self.protected.get(&labels::ALG) {
-            Algorithm::from_identifier(*alg as i32)
+            // Out-of-range values must not truncate onto a valid identifier
+            i32::try_from(*alg)
+                .ok()
+                .and_then(Algorithm::from_identifier)
         } else {
             None
         }
