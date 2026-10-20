@@ -138,6 +138,9 @@ pub mod header;
 pub mod token;
 pub mod utils;
 
+#[cfg(test)]
+mod tests_clock;
+
 pub use cat_claims::{
     catalpn, catdpop, catgeoalt, catgeocoord, catgeoiso3166, cath, catif, catifdata, catm, catnip,
     catpor, catr, catreplay, cattpk, cattprint, catu, catv,
