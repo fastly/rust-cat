@@ -168,3 +168,30 @@ pub fn current_timestamp() -> u64 {
         .expect("Time went backwards")
         .as_secs()
 }
+
+/// Minimum HMAC-SHA256 key length: RFC 7518 §3.2 requires a key at least as
+/// long as the hash output (256 bits).
+pub(crate) const MIN_HMAC_SHA256_KEY_BYTES: usize = 32;
+
+/// Check that `key` is a valid SPKI DER-encoded P-256 public key.
+pub(crate) fn check_es256_public_key(key: &[u8]) -> Result<(), Error> {
+    use p256::ecdsa::VerifyingKey;
+    use p256::pkcs8::DecodePublicKey;
+
+    VerifyingKey::from_public_key_der(key)
+        .map(|_| ())
+        .map_err(|e| Error::InvalidKey(format!("Invalid ES256 public key: {e}")))
+}
+
+/// Check that `key` is a valid SPKI DER-encoded RSA public key of at least
+/// [`MIN_RSA_KEY_BITS`] bits.
+#[cfg(feature = "ps256")]
+pub(crate) fn check_ps256_public_key(key: &[u8]) -> Result<(), Error> {
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::traits::PublicKeyParts;
+    use rsa::RsaPublicKey;
+
+    let public_key = RsaPublicKey::from_public_key_der(key)
+        .map_err(|e| Error::InvalidKey(format!("Invalid PS256 public key: {e}")))?;
+    ensure_rsa_key_bits(public_key.n().bits())
+}

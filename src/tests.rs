@@ -2408,3 +2408,49 @@ fn test_ps256_without_feature_is_rejected() {
         Err(crate::Error::InvalidAlgorithm(_))
     ));
 }
+
+#[test]
+fn test_checked_hmac_key_enforces_minimum_length() {
+    assert!(VerifyingKey::hmac_sha256(&[0u8; 32]).is_ok());
+    assert!(matches!(
+        VerifyingKey::hmac_sha256(&[0u8; 31]),
+        Err(crate::Error::InvalidKey(_))
+    ));
+}
+
+#[test]
+fn test_checked_es256_key_validates_spki() {
+    let (private_key, public_key) = es256_keys();
+    let key = VerifyingKey::es256_spki(&public_key).expect("valid ES256 SPKI");
+    let token = build_signed_token(Algorithm::Es256, &private_key);
+    assert!(token.verify_with_key(key).is_ok());
+
+    for bad in [
+        &b"not a key"[..],
+        &public_key[..public_key.len() - 1],
+        &private_key,
+    ] {
+        assert!(matches!(
+            VerifyingKey::es256_spki(bad),
+            Err(crate::Error::InvalidKey(_))
+        ));
+    }
+}
+
+#[cfg(feature = "ps256")]
+#[test]
+fn test_checked_ps256_key_validates_spki_and_size() {
+    let (_, public_key) = ps256_keys();
+    assert!(VerifyingKey::ps256_spki(&public_key).is_ok());
+
+    let small = ct_codecs::Base64::decode_to_vec(PS256_1024_PUBLIC_KEY_B64, None).unwrap();
+    assert!(matches!(
+        VerifyingKey::ps256_spki(&small),
+        Err(crate::Error::InvalidKey(_))
+    ));
+    let (_, es256_public) = es256_keys();
+    assert!(matches!(
+        VerifyingKey::ps256_spki(&es256_public),
+        Err(crate::Error::InvalidKey(_))
+    ));
+}
