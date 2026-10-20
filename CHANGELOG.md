@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crate's own `verify` would reject. This state is only reachable by manually
   constructing a `Token` via `Token::new` without an algorithm.
 
+- `Token::from_bytes` rejects malformed registered claims (RFC 8392 §3.1) with
+  the new `Error::InvalidRegisteredClaim`, instead of silently dropping them.
+  Previously a negative `exp` was cast to a far-future time, so the token never
+  expired, and an `iss`, `sub` or `aud` of the wrong type was dropped, so it
+  passed `expected_issuer` / `expected_audience` unless the claim was required.
+  NumericDates (`exp`, `nbf`, `iat`) must be non-negative integers, and `cti`
+  must be a byte string; a text `cti`, previously tolerated, is now rejected.
+- An array-valued `aud` is now checked: `expected_audience` must match one of
+  its entries. Previously such tokens passed any expected audience. Use the new
+  `Token::audiences()` to read all entries.
+- `RegisteredClaims::from_map` no longer casts a negative NumericDate to a
+  far-future time; it skips it. The new `RegisteredClaims::try_from_map` and
+  `Claims::try_from_map` are the strict variants.
+
 ### Security
 
 - **Algorithm confusion:** `Token::verify(&[u8])` picked the algorithm from the

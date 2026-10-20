@@ -44,6 +44,9 @@ pub struct Token {
     /// encoded as a CBOR array): both sides drop the same information, so an
     /// unmutated token still matches and keeps its byte-faithful signed bytes.
     baseline_payload_projection: Option<ClaimsMap>,
+    /// Audiences of an array-valued `aud` claim, as decoded. A single text
+    /// `aud` is held in `claims.registered.aud` instead.
+    audience_list: Option<Vec<String>>,
 }
 
 impl Token {
@@ -56,6 +59,7 @@ impl Token {
             original_payload_bytes: None,
             original_protected_bytes: None,
             baseline_payload_projection: None,
+            audience_list: None,
         }
     }
 
@@ -155,7 +159,10 @@ impl Token {
         // 3. Payload
         let claims_bytes = dec.bytes()?;
         let claims_map = decode_map(claims_bytes)?;
-        let claims = Claims::from_map(&claims_map);
+        // Strict: a registered claim that is present but malformed is an
+        // error rather than being dropped, so it can't skip verification.
+        let claims = Claims::try_from_map(&claims_map)?;
+        let audience_list = crate::claims::audience_list(&claims_map)?;
         // Baseline projection of the payload as decoded. `claims` is
         // `Claims::from_map(&claims_map)`, so `claims.to_map()` is exactly the
         // round-tripped projection used later to detect mutation.
@@ -171,6 +178,7 @@ impl Token {
             original_payload_bytes: Some(claims_bytes.to_vec()),
             original_protected_bytes: Some(original_protected_bytes),
             baseline_payload_projection: Some(baseline_payload_projection),
+            audience_list,
         })
     }
 
@@ -302,14 +310,15 @@ impl Token {
             }
         }
 
-        // Check audience
+        // Check audience. An array-valued aud matches if any entry does.
         if let Some(expected_aud) = &options.expected_audience {
-            if let Some(aud) = &self.claims.registered.aud {
-                if aud != expected_aud {
-                    return Err(Error::InvalidAudience);
+            let audiences = self.audiences();
+            if audiences.is_empty() {
+                if options.require_aud {
+                    return Err(Error::MissingClaim("aud".to_string()));
                 }
-            } else if options.require_aud {
-                return Err(Error::MissingClaim("aud".to_string()));
+            } else if !audiences.contains(&expected_aud.as_str()) {
+                return Err(Error::InvalidAudience);
             }
         }
 
@@ -1038,6 +1047,18 @@ impl Token {
         self.claims.registered.aud.as_deref()
     }
 
+    /// All audiences of the token's `aud` claim
+    ///
+    /// Returns the single audience of a text `aud`, every entry of an
+    /// array-valued `aud`, or an empty list if there is no `aud` claim.
+    pub fn audiences(&self) -> Vec<&str> {
+        match (&self.claims.registered.aud, &self.audience_list) {
+            (Some(aud), _) => vec![aud.as_str()],
+            (None, Some(list)) => list.iter().map(String::as_str).collect(),
+            (None, None) => Vec::new(),
+        }
+    }
+
     /// Get the expiration timestamp
     pub fn expiration(&self) -> Option<u64> {
         self.claims.registered.exp
@@ -1536,6 +1557,7 @@ impl TokenBuilder {
             original_payload_bytes: None,
             original_protected_bytes: None,
             baseline_payload_projection: None,
+            audience_list: None,
         };
 
         // Compute signature input based on algorithm.
@@ -1571,6 +1593,7 @@ impl TokenBuilder {
             original_payload_bytes: None,
             original_protected_bytes: None,
             baseline_payload_projection: None,
+            audience_list: None,
         })
     }
 }

@@ -778,6 +778,9 @@ fn test_aud_as_array_verifies_and_roundtrips() {
         "array-valued aud cannot be represented by Option<String> and is dropped"
     );
 
+    // The entries are readable through `Token::audiences`.
+    assert_eq!(token.audiences(), vec!["aud-one", "aud-two"]);
+
     // Regression: an unmutated token must still verify against the original key.
     assert!(
         token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
@@ -831,10 +834,9 @@ fn test_aud_as_array_mutation_is_reflected() {
 }
 
 #[test]
-fn test_cti_as_text_verifies_and_roundtrips() {
-    // A second lossy trigger: `cti` (key 7) carried as text rather than bytes.
-    // `RegisteredClaims::from_map` only accepts `cti` as bytes, so it is dropped,
-    // yet the token must still verify and round-trip byte-faithfully.
+fn test_cti_as_text_is_rejected() {
+    // RFC 8392 §3.1.7: `cti` (key 7) is a byte string. A text `cti` is
+    // malformed and is rejected on decode rather than silently dropped.
     let key = b"testSecret";
 
     let protected: &[u8] = &[0xa1, 0x01, 0x05];
@@ -843,20 +845,10 @@ fn test_cti_as_text_verifies_and_roundtrips() {
     push_text(&mut payload, "cti-as-text");
     let token_bytes = build_mac0_token_bytes(protected, &payload, key);
 
-    let token = Token::from_bytes(&token_bytes).expect("decode cti-as-text token");
-    assert_eq!(
-        token.claims.registered.cti, None,
-        "text-valued cti cannot be represented as bytes and is dropped"
-    );
-    assert!(
-        token.verify_with_key(VerifyingKey::HmacSha256(key)).is_ok(),
-        "unmutated cti-as-text token must verify"
-    );
-    assert_eq!(
-        token.to_bytes().expect("re-encode cti-as-text token"),
-        token_bytes,
-        "unmutated lossy token must re-encode byte-faithfully"
-    );
+    assert!(matches!(
+        Token::from_bytes(&token_bytes),
+        Err(crate::Error::InvalidRegisteredClaim(_))
+    ));
 }
 
 #[test]

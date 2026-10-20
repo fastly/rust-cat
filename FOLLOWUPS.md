@@ -52,30 +52,18 @@ write-only.
 
 ## Data model (separate PR — breaking)
 
-### Array-valued `aud` is not readable through the typed API
+### Array-valued `aud` is not representable in `RegisteredClaims`
 
-`RegisteredClaims.aud` is `Option<String>` and cannot represent an `aud`
-(CWT key 3) encoded as a CBOR **array** of audiences, which RFC 8392 / RFC 7519
-permit. On decode, `Claims::from_map` silently drops the array-valued `aud` and
-`Token::audience()` returns `None`.
+`RegisteredClaims.aud` is `Option<String>`, so an `aud` (CWT key 3) encoded as
+a CBOR array of audiences, which RFC 8392 / RFC 7519 permit, leaves it `None`.
+Such tokens still verify and round-trip byte-faithfully. The entries are
+readable through `Token::audiences()`, and `expected_audience` matches if any
+entry does (see `test_aud_as_array_verifies_and_roundtrips`).
 
-The **correctness** half is already handled: `get_payload_bytes` reuses the
-producer's original signed payload bytes (via `baseline_payload_projection`), so
-such tokens still **verify** and **round-trip byte-faithfully** even though the
-claim is invisible to the typed API (see `test_aud_as_array_verifies_and_roundtrips`
-and `test_cti_as_text_verifies_and_roundtrips` in `src/tests.rs`). The urgent
-interop/availability regression — valid tokens failing verification — is
-resolved.
-
-- **Deferred (not done):** making the array audience *readable* through the
-  typed API. That requires changing the type of `RegisteredClaims.aud` (and
+- **Deferred (not done):** representing array audiences in `RegisteredClaims`
+  itself. That requires changing the type of `RegisteredClaims.aud` (and
   `with_audience` / `audience()`), a breaking public API change.
-- **Why deferred:** exposing the value is a nicety with a breaking cost; revisit
-  only when bumping a breaking version, and only if a consumer actually needs to
-  inspect array audiences. The same lossy-but-now-safe shape affects
-  non-conformant producers (e.g. `cti` as text); those are malformed and not
-  worth a data-model change.
-- Location: `src/claims.rs` — `RegisteredClaims` / `Claims::from_map`.
+- Location: `src/claims.rs` — `RegisteredClaims`.
 
 ## Performance (hot path)
 
