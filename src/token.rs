@@ -114,19 +114,25 @@ impl Token {
     /// Decode a token from CBOR bytes
     ///
     /// This function supports both COSE_Sign1 (tag 18) and COSE_Mac0 (tag 17) structures,
-    /// as well as custom tags. It will automatically skip any tags and process the underlying
-    /// CBOR array.
+    /// optionally preceded by the CWT tag (61), as well as untagged input. If a
+    /// COSE_Mac0 or COSE_Sign1 tag is present, it must match the class of the
+    /// protected header's algorithm (MAC or signature); a mismatch is rejected
+    /// with [`Error::StructureTagMismatch`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let mut dec = Decoder::new(bytes);
 
-        // Check if the token starts with a tag (COSE_Sign1 tag = 18, COSE_Mac0 tag = 17, or custom tag = 61)
-        if dec.datatype()? == minicbor::data::Type::Tag {
-            // Skip the tag
-            let _ = dec.tag()?;
-
-            // Check for a second tag
-            if dec.datatype()? == minicbor::data::Type::Tag {
-                let _ = dec.tag()?;
+        // Accept up to two leading tags (e.g. CWT = 61 followed by COSE_Mac0 = 17
+        // or COSE_Sign1 = 18), remembering any COSE structure tag so it can be
+        // checked against the algorithm below.
+        let mut structure_tag = None;
+        for _ in 0..2 {
+            if dec.datatype()? != minicbor::data::Type::Tag {
+                break;
+            }
+            let tag = dec.tag()?.as_u64();
+            if tag == AlgorithmClass::Mac.cbor_tag() || tag == AlgorithmClass::Signature.cbor_tag()
+            {
+                structure_tag = Some(tag);
             }
         }
 
@@ -151,6 +157,21 @@ impl Token {
             protected,
             unprotected,
         };
+
+        // The COSE structure tag must agree with the algorithm's class, the
+        // inverse of the invariant `to_bytes` writes: a COSE_Mac0 token cannot
+        // carry a signature algorithm and vice versa. Untagged tokens, and
+        // tokens with an unknown or missing algorithm (which `verify` rejects),
+        // are left as before.
+        if let (Some(tag), Some(alg)) = (structure_tag, header.algorithm()) {
+            if tag != alg.class().cbor_tag() {
+                return Err(Error::StructureTagMismatch {
+                    tag,
+                    algorithm: alg,
+                    expected: alg.class().cbor_tag(),
+                });
+            }
+        }
 
         // 3. Payload
         let claims_bytes = dec.bytes()?;
