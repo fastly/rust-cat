@@ -84,13 +84,15 @@ let token_bytes = token.to_bytes().expect("Failed to encode token");
 ### Verifying a token
 
 ```rust
-use common_access_token::{Token, VerificationOptions};
+use common_access_token::{Token, VerificationOptions, VerifyingKey};
 
 // Decode the token
 let token = Token::from_bytes(&token_bytes).expect("Failed to decode token");
 
 // Verify the signature
-token.verify(key).expect("Failed to verify signature");
+token
+    .verify_with_key(VerifyingKey::HmacSha256(key))
+    .expect("Failed to verify signature");
 
 // Verify the claims
 let options = VerificationOptions::new()
@@ -161,18 +163,20 @@ Asymmetric signature algorithms (ES256, PS256) instead use the COSE_Sign1 struct
 
 ### Signing Algorithms
 
-The library supports three algorithms, selected via `Algorithm` on the builder. The bytes passed to `sign()` and `verify()` are interpreted according to the algorithm:
+The library supports three algorithms, selected via `Algorithm` on the builder. The `sign()` key bytes and the [`VerifyingKey`] passed to `verify_with_key()` are interpreted according to the algorithm:
 
-| Algorithm           | COSE id | Structure  | `sign()` key                     | `verify()` key                  |
-| ------------------- | ------- | ---------- | -------------------------------- | ------------------------------- |
-| `Algorithm::HmacSha256` | 5   | COSE_Mac0  | raw symmetric key bytes          | raw symmetric key bytes         |
-| `Algorithm::Es256`  | -7      | COSE_Sign1 | PKCS#8 DER P-256 private key      | SPKI DER P-256 public key       |
-| `Algorithm::Ps256`  | -37     | COSE_Sign1 | PKCS#8 DER RSA private key        | SPKI DER RSA public key         |
+| Algorithm           | COSE id | Structure  | `sign()` key                     | `verify_with_key()` key              |
+| ------------------- | ------- | ---------- | -------------------------------- | ------------------------------------ |
+| `Algorithm::HmacSha256` | 5   | COSE_Mac0  | raw symmetric key bytes          | `VerifyingKey::HmacSha256` (raw bytes) |
+| `Algorithm::Es256`  | -7      | COSE_Sign1 | PKCS#8 DER P-256 private key      | `VerifyingKey::Es256` (SPKI DER public key) |
+| `Algorithm::Ps256`  | -37     | COSE_Sign1 | PKCS#8 DER RSA private key        | `VerifyingKey::Ps256` (SPKI DER public key) |
 
 ES256 is ECDSA over the NIST P-256 curve with SHA-256; signatures are the fixed 64-byte COSE `r || s` form. PS256 is RSASSA-PSS with SHA-256 and MGF1-SHA-256. PSS uses a random salt, so each signature over the same input differs while all remain valid.
 
+> **Verify with a typed `VerifyingKey`.** `verify_with_key()` binds the algorithm to the key you provide and rejects any token whose header `alg` does not match, which prevents algorithm-confusion forgery (an attacker crafting an `HmacSha256` token whose MAC is computed over your public verification key). The older `verify(&[u8])` is deprecated and only accepts HMAC-SHA256.
+
 ```rust
-use common_access_token::{Algorithm, KeyId, RegisteredClaims, TokenBuilder, current_timestamp};
+use common_access_token::{Algorithm, KeyId, RegisteredClaims, TokenBuilder, VerifyingKey, current_timestamp};
 
 // `private_key` is PKCS#8 DER; `public_key` is SPKI DER.
 let token = TokenBuilder::new()
@@ -188,7 +192,9 @@ let token = TokenBuilder::new()
 
 let token_bytes = token.to_bytes().expect("Failed to encode token");
 let decoded = common_access_token::Token::from_bytes(&token_bytes).expect("decode");
-decoded.verify(public_key).expect("Failed to verify ES256 signature");
+decoded
+    .verify_with_key(VerifyingKey::Es256(public_key))
+    .expect("Failed to verify ES256 signature");
 ```
 
 ### Nested Map Claims
@@ -256,7 +262,9 @@ This library creates HMAC tokens using the COSE_Mac0 structure with proper CBOR 
 
 ```rust
 // This will work with both COSE_Sign1 and COSE_Mac0 tokens
-token.verify(key).expect("Failed to verify signature");
+token
+    .verify_with_key(VerifyingKey::HmacSha256(key))
+    .expect("Failed to verify signature");
 ```
 
 ## CAT-specific Claims
