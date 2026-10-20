@@ -24,6 +24,7 @@ This library uses the [minicbor](https://crates.io/crates/minicbor) crate for CB
 - Multiple Signing Algorithms: HMAC-SHA256 (HS256) MACs, plus ECDSA P-256 (ES256) and RSASSA-PSS (PS256) asymmetric signatures
 - Comprehensive Verification: Validate signatures, expiration times, and other claims
 - CAT-specific Validation: Validate URI restrictions, HTTP method constraints, and replay protection
+- Media over QUIC (MoQ): Issue and validate `moqt` / `moqt-reval` scopes from draft-ietf-moq-c4m for MoQT relays, publishers, and clients
 
 ## Installation
 
@@ -408,6 +409,86 @@ The `cat_keys` module provides constants for all CAT-specific claim keys:
 - `CATIF` - Common Access Token If (catif) claim key
 - `CATR` - Common Access Token Renewal (catr) claim key
 
+## Media over QUIC (MoQ) Tokens
+
+The `moqt` and `moqt-reval` claims from
+[draft-ietf-moq-c4m](https://datatracker.ietf.org/doc/draft-ietf-moq-c4m/)
+authorize MoQ Transport actions on specific Full Track Names (namespace tuple +
+track name). The claim keys (327, 328) are provisional and come from the draft's
+test vectors; they're exposed as `moqt_keys::MOQT` and `moqt_keys::MOQT_REVAL`.
+To interoperate with an issuer that uses other labels before IANA assignment,
+set `VerificationOptions::moqt_claim_labels`, or read a claim with
+`Token::moqt_claim_at` / `moqt_reval_at`.
+
+```rust
+use common_access_token::{
+    current_timestamp, Algorithm, MoqtAction, MoqtClaim, MoqtRequest, MoqtRevalidation,
+    MoqtScope, RegisteredClaims, Token, TokenBuilder, VerificationOptions, VerifyingKey,
+};
+
+let key = b"shared-secret";
+
+// Issuer: a publisher may announce example.com/alice and publish "video-*" tracks
+let token = TokenBuilder::new()
+    .algorithm(Algorithm::HmacSha256)
+    .registered_claims(
+        RegisteredClaims::new().with_expiration(current_timestamp() + 3600),
+    )
+    .moqt(MoqtClaim::new(vec![MoqtScope::new([
+        MoqtAction::PublishNamespace,
+        MoqtAction::Publish,
+    ])
+    .namespace_exact("example.com")
+    .namespace_exact("alice")
+    .track_prefix("video-")]))
+    .moqt_reval(300)
+    .sign(key)
+    .unwrap();
+
+// Validator (relay, origin, or publisher): signature first, then the request
+let token = Token::from_bytes(&token.to_bytes().unwrap()).unwrap();
+token.verify_with_key(VerifyingKey::HmacSha256(key)).unwrap();
+
+let options = VerificationOptions::new()
+    .verify_moqt(true)
+    .moqt_revalidation(MoqtRevalidation::MinInterval(60))
+    .moqt_request(MoqtRequest::track(
+        MoqtAction::Publish,
+        ["example.com", "alice"],
+        "video-hd",
+    ));
+token.verify_claims(&options).unwrap();
+```
+
+Notes for validators:
+
+- **Same check for every role.** Edge relays validating subscribers or
+  publishers, origins validating relays, and publishers validating a relay's
+  SUBSCRIBE all use `MoqtRequest` + `verify_claims`. Publishers and origins
+  should verify with an ES256/PS256 public key rather than holding an HMAC
+  secret. Always use `verify_with_key` with a typed `VerifyingKey`, which
+  rejects HMAC forgeries computed over a public key.
+- **Which matches apply.** Setup actions only check that the action is listed.
+  Namespace actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) also check the
+  namespace. Track actions also check the track, and are denied if no track is
+  given. A request namespace shorter than the scope's is denied.
+- **Strict parsing.** A malformed `moqt` claim fails verification with
+  `Error::InvalidMoqtClaim`. It's never ignored.
+- **Default-deny.** With `verify_moqt(true)`, a token with no `moqt` claim
+  authorizes no MoQ action, as draft-ietf-moq-c4m §2 requires.
+- **Session-held tokens.** To check later actions (such as `REQUEST_UPDATE`)
+  against a token from setup, keep the `Token` and call `verify_claims` again, or
+  call `MoqtClaim::permits` on the result of `token.moqt_claim()`. The latter
+  skips the `exp`/`nbf` checks.
+- **Revalidation.** If `moqt-reval` is present and non-zero, re-run
+  `verify_claims` at least every `token.moqt_reval()` seconds for ongoing actions.
+  Recipients that can't revalidate leave `moqt_revalidation` at its default,
+  `Unsupported`, and such tokens are rejected, as the draft requires.
+- **Forwarding upstream.** Forward the raw token bytes you received.
+  `to_bytes()` re-encodes the outer COSE structure.
+
+See `examples/moqt.rs` for edge relay, ingest relay, and publisher validation.
+
 ## Examples
 
 See the `examples` directory for complete usage examples:
@@ -416,6 +497,7 @@ See the `examples` directory for complete usage examples:
 - `cat_specific_claims.rs`: Demonstrates how to use CAT-specific claims (CATU, CATM, CATR, CATREPLAY)
 - `cat_validation.rs`: Shows how to validate CAT-specific claims
 - `extended_cat_claims.rs`: Comprehensive examples of all CAT claims including CATPOR, CATNIP, CATALPN, CATH, CATGEO*, CATTPK, CATDPOP, CATIF
+- `moqt.rs`: Media over QUIC tokens validated by an edge relay, an ingest relay, and a publisher
 
 ## Benchmarks
 

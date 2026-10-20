@@ -151,3 +151,32 @@ prefixes (with implicit size ceilings) that `minicbor::Encoder` already produces
 Low risk today, but they can drift from what the library emits. Test-only.
 
 - Location: `src/tests.rs`.
+
+## MoQ (draft-ietf-moq-c4m) — deferred from the initial `moqt` support
+
+### Composite claims (`or` / `and` / `nor` / `crit`)
+
+The draft uses draft-lemmons-cose-composite-claims to bind different `exp` values
+to different `moqt` scopes. All of those claim keys are still TBD.
+
+- **Fix direction:** evaluate nested claim sets recursively, with a depth limit
+  of at least 4. Reject `moqt-reval` inside composite claims; the draft makes
+  such tokens not well-formed.
+
+### DPoP proof verification
+
+Tokens can be bound to a client key with `cnf.jkt` (key 8 / 3) and `catdpop`.
+Validators then check a `dpop-proof+jwt` whose `actx` names the MoQT action,
+`tns`, and `tn`.
+
+- **Fix direction:** this needs a JWT/JWK stack, so build it as a feature-gated
+  module or a separate crate. It can reuse `MoqtRequest` to check `actx`. Until
+  it exists, forwarded client tokens are bearer tokens.
+
+### Spec ambiguities to revisit as the draft evolves
+
+- Whether namespace and track matches apply to session and namespace actions.
+  The current implementation ignores them for session actions and ignores the
+  track match for namespace actions; see the `moqt` module docs.
+- How a server presents a token to a client for `SERVER_SETUP`.
+- The final IANA claim keys. 327 and 328 are taken from the test vectors.

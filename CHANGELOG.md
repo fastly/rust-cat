@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **Media over QUIC (MoQ)** support for draft-ietf-moq-c4m-01:
+  - The `moqt` module with typed `MoqtClaim` / `MoqtScope` / `BinMatch` scopes,
+    `MoqtAction` codes, and `MoqtRequest`. Parsing is strict, and matching is
+    bytewise against Full Track Names.
+  - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
+  - `MoqtScope::matches_name`, the action-independent name matcher that
+    `permits` uses, for re-checking namespaces and tracks against a scope.
+  - `Token::moqt_claim` and `Token::moqt_reval`.
+  - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation,
+    moqt_claim_labels}`. `MoqtClaimLabels` overrides the provisional claim
+    labels, and `Token::moqt_claim_at` / `moqt_reval_at` read a claim at any
+    label.
+    With `verify_moqt`, tokens without a `moqt` claim are denied.
+  - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`, and
+    `Error::MoqtRevalidationUnsupported`.
+  - New constants `moqt_keys`, `moqt_actions`, and `moqt_match_types`. The claim
+    keys 327 and 328 are provisional, pending IANA.
+  - `examples/moqt.rs`.
+- `CborValue::Float`. Half, single, and double precision floats are decoded, and
+  floats are encoded in the shortest exact width.
+
+### Changed
+
+- **BREAKING:** `CborValue` is now `#[non_exhaustive]` and gained a `Float`
+  variant.
+- **BREAKING:** `VerificationOptions` has new public fields, so struct literals
+  must use `..Default::default()` or the builder methods.
+
 ## [0.3.0] - Unreleased
 
 ### Added
