@@ -24,7 +24,7 @@ regex = "1.13.1"
 # ES256 (ECDSA P-256 + SHA-256, COSE alg -7)
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 # PS256 (RSASSA-PSS + SHA-256, COSE alg -37), behind the `ps256` feature
-rsa = { version = "0.9", features = ["sha2"], optional = true }
+rsa = { version = "0.9.10", features = ["sha2"], optional = true }
 sha2 = { version = "0.10", optional = true }
 # RNG for PSS salt generation (WASM-friendly via getrandom)
 rand_core = { version = "0.6", features = ["getrandom"], optional = true }

@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PS256 signing and verification set the RFC 8230 §2 salt length (32 bytes)
+  explicitly; signatures with any other salt length are refused. The minimum
+  `rsa` version is now 0.9.10.
 - **BREAKING:** `Algorithm` and `Error` are now `#[non_exhaustive]`. Downstream
   `match` expressions over either enum must include a wildcard arm. This is a
   one-time break that allows future variants (additional algorithms or error

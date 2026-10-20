@@ -85,6 +85,11 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
 #[cfg(feature = "ps256")]
 const MIN_RSA_KEY_BITS: usize = 2048;
 
+/// PS256 salt length: RFC 8230 §2 fixes it to the hash output size (32 bytes
+/// for SHA-256). Set explicitly rather than relying on the `rsa` default.
+#[cfg(feature = "ps256")]
+const PS256_SALT_LEN: usize = 32;
+
 /// Reject an RSA modulus smaller than [`MIN_RSA_KEY_BITS`].
 ///
 /// Shared by `compute_ps256` and `verify_ps256` so the floor policy (and its
@@ -115,7 +120,7 @@ pub fn compute_ps256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     let private_key = RsaPrivateKey::from_pkcs8_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 private key: {e}")))?;
     ensure_rsa_key_bits(private_key.n().bits())?;
-    let signing_key = SigningKey::<sha2::Sha256>::new(private_key);
+    let signing_key = SigningKey::<sha2::Sha256>::new_with_salt_len(private_key, PS256_SALT_LEN);
     let mut rng = rand_core::OsRng;
     let signature = signing_key.sign_with_rng(&mut rng, data);
     Ok(signature.to_vec())
@@ -136,7 +141,8 @@ pub fn verify_ps256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
     let public_key = RsaPublicKey::from_public_key_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid PS256 public key: {e}")))?;
     ensure_rsa_key_bits(public_key.n().bits())?;
-    let verifying_key = VerifyingKey::<sha2::Sha256>::new(public_key);
+    // Only the RFC 8230 salt length is accepted; other lengths fail.
+    let verifying_key = VerifyingKey::<sha2::Sha256>::new_with_salt_len(public_key, PS256_SALT_LEN);
     let signature = Signature::try_from(signature).map_err(|_| Error::SignatureVerification)?;
     verifying_key
         .verify(data, &signature)

@@ -2023,6 +2023,29 @@ fn test_ps256_signatures_are_randomized() {
         .expect("token_b should verify");
 }
 
+#[cfg(feature = "ps256")]
+#[test]
+fn test_ps256_requires_rfc8230_salt_length() {
+    // RFC 8230 §2: PS256 uses a salt as long as the SHA-256 output (32 bytes).
+    // Signatures with any other salt length are refused.
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::signature::{RandomizedSigner, SignatureEncoding};
+
+    let (private_key, public_key) = ps256_keys();
+    let rsa_key = rsa::RsaPrivateKey::from_pkcs8_der(&private_key).unwrap();
+    let data = b"ps256 salt length";
+    for (salt_len, accepted) in [(32, true), (0, false), (20, false), (64, false)] {
+        let signer =
+            rsa::pss::SigningKey::<sha2::Sha256>::new_with_salt_len(rsa_key.clone(), salt_len);
+        let signature = signer.sign_with_rng(&mut rand_core::OsRng, data).to_vec();
+        assert_eq!(
+            crate::utils::verify_ps256(&public_key, data, &signature).is_ok(),
+            accepted,
+            "salt length {salt_len}"
+        );
+    }
+}
+
 #[test]
 fn test_es256_invalid_private_key_errors() {
     let result = TokenBuilder::new()
