@@ -1604,10 +1604,45 @@ fn decode_map(bytes: &[u8]) -> Result<HeaderMap, Error> {
     decode_map_direct(&mut dec)
 }
 
+/// Maximum nesting depth of maps and arrays accepted when decoding.
+///
+/// Decoding recurses once per level, so without a bound a token nesting
+/// containers deeply enough overflows the stack and aborts the process. CWT,
+/// COSE and CAT structures nest only a few levels; 32 leaves ample headroom.
+const MAX_NESTING_DEPTH: usize = 32;
+
+/// Read a definite container length, rejecting lengths the remaining input
+/// can't possibly hold (each item takes at least `min_item_bytes`). This keeps
+/// a declared length from driving allocation or iteration beyond the input.
+fn container_len(
+    dec: &Decoder<'_>,
+    len: Option<u64>,
+    min_item_bytes: u64,
+    kind: &str,
+) -> Result<usize, Error> {
+    let len = len.ok_or_else(|| {
+        Error::InvalidFormat(format!("indefinite-length {kind}s are not supported"))
+    })?;
+    let remaining = (dec.input().len() - dec.position()) as u64;
+    if len > remaining / min_item_bytes {
+        return Err(Error::InvalidFormat(format!(
+            "{kind} declares {len} items but only {remaining} bytes remain"
+        )));
+    }
+    // Bounded by the input length, so this fits in usize
+    Ok(len as usize)
+}
+
 /// Decode a CBOR array
-fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
-    let array_len = dec.array()?.unwrap_or(0);
-    let mut array = Vec::with_capacity(array_len as usize);
+fn decode_array(dec: &mut Decoder<'_>, depth: usize) -> Result<Vec<CborValue>, Error> {
+    if depth >= MAX_NESTING_DEPTH {
+        return Err(Error::InvalidFormat(format!(
+            "CBOR nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
+        )));
+    }
+    let array_len = dec.array()?;
+    let array_len = container_len(dec, array_len, 1, "array")?;
+    let mut array = Vec::with_capacity(array_len);
 
     for _ in 0..array_len {
         // Try to decode based on the datatype
@@ -1644,11 +1679,11 @@ fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
             CborValue::Text(s.to_string())
         } else if datatype == minicbor::data::Type::Map {
             // Nested map
-            let nested_map = decode_map_direct(dec)?;
+            let nested_map = decode_map_nested(dec, depth + 1)?;
             CborValue::Map(nested_map)
         } else if datatype == minicbor::data::Type::Array {
             // Nested array
-            let nested_array = decode_array(dec)?;
+            let nested_array = decode_array(dec, depth + 1)?;
             CborValue::Array(nested_array)
         } else if datatype == minicbor::data::Type::Null {
             // Null value
@@ -1668,7 +1703,19 @@ fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
 }
 
 fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
-    let map_len = dec.map()?.unwrap_or(0);
+    decode_map_nested(dec, 0)
+}
+
+/// Decode a CBOR map at nesting `depth` (see [`MAX_NESTING_DEPTH`])
+fn decode_map_nested(dec: &mut Decoder<'_>, depth: usize) -> Result<HeaderMap, Error> {
+    if depth >= MAX_NESTING_DEPTH {
+        return Err(Error::InvalidFormat(format!(
+            "CBOR nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
+        )));
+    }
+    let map_len = dec.map()?;
+    // Each entry is a key and a value, at least one byte each
+    let map_len = container_len(dec, map_len, 2, "map")?;
     let mut map = HeaderMap::new();
 
     for _ in 0..map_len {
@@ -1708,11 +1755,11 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
             CborValue::Text(s.to_string())
         } else if datatype == minicbor::data::Type::Map {
             // Nested map
-            let nested_map = decode_map_direct(dec)?;
+            let nested_map = decode_map_nested(dec, depth + 1)?;
             CborValue::Map(nested_map)
         } else if datatype == minicbor::data::Type::Array {
             // Array
-            let array = decode_array(dec)?;
+            let array = decode_array(dec, depth + 1)?;
             CborValue::Array(array)
         } else if datatype == minicbor::data::Type::Null {
             // Null value
@@ -1729,4 +1776,132 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
     }
 
     Ok(map)
+}
+
+#[cfg(test)]
+mod decode_limit_tests {
+    use super::*;
+
+    /// A COSE_Mac0-shaped array whose protected header, unprotected header and
+    /// payload are supplied as raw encoded bytes (the protected header and
+    /// payload are wrapped in byte strings here).
+    fn cose(protected_map: &[u8], unprotected_map: &[u8], payload_map: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut enc = Encoder::new(&mut out);
+        enc.array(4).unwrap();
+        enc.bytes(protected_map).unwrap();
+        out.extend_from_slice(unprotected_map);
+        let mut enc = Encoder::new(&mut out);
+        enc.bytes(payload_map).unwrap();
+        enc.bytes(&[]).unwrap();
+        out
+    }
+
+    const HS256: &[u8] = &[0xa1, 0x01, 0x05];
+    const EMPTY: &[u8] = &[0xa0];
+
+    /// `{1: <value>}`
+    fn map_with(value: &[u8]) -> Vec<u8> {
+        let mut m = vec![0xa1, 0x01];
+        m.extend_from_slice(value);
+        m
+    }
+
+    /// `n` nested single-element arrays around an empty array (n + 1 arrays)
+    fn nested_arrays(n: usize) -> Vec<u8> {
+        let mut v = vec![0x81; n];
+        v.push(0x80);
+        v
+    }
+
+    /// Each malformed value in each position: protected header, unprotected
+    /// header, payload.
+    fn assert_rejected_everywhere(value: &[u8]) {
+        let inner = map_with(value);
+        for bytes in [
+            cose(&inner, EMPTY, EMPTY),
+            cose(HS256, &inner, EMPTY),
+            cose(HS256, EMPTY, &inner),
+        ] {
+            assert!(matches!(
+                Token::from_bytes(&bytes),
+                Err(Error::InvalidFormat(_) | Error::CborDecode(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn test_huge_declared_array_length_is_rejected_without_allocating() {
+        // array(2^64 - 1): previously a capacity-overflow panic
+        assert_rejected_everywhere(&[0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        // array(2^32) with a few bytes following
+        assert_rejected_everywhere(&[0x9b, 0, 0, 0, 1, 0, 0, 0, 0, 0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_huge_declared_map_length_is_rejected() {
+        assert_rejected_everywhere(&[0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        // map(3) with room for only one entry
+        assert_rejected_everywhere(&[0xa3, 0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_deep_nesting_is_rejected_without_overflowing_the_stack() {
+        // Previously a stack overflow that aborted the process
+        assert_rejected_everywhere(&nested_arrays(200_000));
+        // Alternating maps and arrays
+        let mut v = Vec::new();
+        for _ in 0..100_000 {
+            v.extend_from_slice(&[0xa1, 0x01, 0x81]);
+        }
+        v.push(0x80);
+        assert_rejected_everywhere(&v);
+    }
+
+    #[test]
+    fn test_nesting_depth_boundary() {
+        // The header map is depth 0 and `nested_arrays(n)` is n + 1 arrays, so
+        // nested_arrays(30) reaches depth 31 (allowed) and 31 reaches depth 32
+        let ok = cose(HS256, &map_with(&nested_arrays(30)), EMPTY);
+        assert!(Token::from_bytes(&ok).is_ok());
+        let too_deep = cose(HS256, &map_with(&nested_arrays(31)), EMPTY);
+        assert!(matches!(
+            Token::from_bytes(&too_deep),
+            Err(Error::InvalidFormat(_))
+        ));
+    }
+
+    #[test]
+    fn test_indefinite_length_containers_are_rejected() {
+        // [_ 1, 2] and {_ 1: 2}
+        assert_rejected_everywhere(&[0x9f, 0x01, 0x02, 0xff]);
+        assert_rejected_everywhere(&[0xbf, 0x01, 0x02, 0xff]);
+    }
+
+    #[test]
+    fn test_truncated_strings_are_rejected() {
+        // bstr / tstr declaring 2^64 - 1 bytes
+        assert_rejected_everywhere(&[0x5b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        assert_rejected_everywhere(&[0x7b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn test_nested_claims_still_decode() {
+        // A realistic catu-style nested claim well within the limit
+        let token = TokenBuilder::new()
+            .algorithm(Algorithm::HmacSha256)
+            .custom_cbor(
+                crate::constants::cat_keys::CATU,
+                CborValue::Map(BTreeMap::from([(
+                    crate::constants::uri_components::PATH,
+                    CborValue::Map(BTreeMap::from([(
+                        crate::constants::match_types::PREFIX,
+                        CborValue::Text("/videos/".into()),
+                    )])),
+                )])),
+            )
+            .sign(b"key")
+            .unwrap();
+        assert!(Token::from_bytes(&token.to_bytes().unwrap()).is_ok());
+    }
 }
