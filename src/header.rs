@@ -197,6 +197,40 @@ impl VerifyingKey<'_> {
 
 // Manual impl so the HMAC shared secret (and, for consistency, public key
 // bytes) never ends up in logs, panics, or other diagnostics.
+impl<'a> VerifyingKey<'a> {
+    /// An HMAC-SHA256 key, checked to be at least 32 bytes (RFC 7518 §3.2
+    /// requires a key at least as long as the hash output).
+    ///
+    /// The [`VerifyingKey::HmacSha256`] variant accepts any key unchecked.
+    pub fn hmac_sha256(secret: &'a [u8]) -> Result<Self, crate::Error> {
+        if secret.len() < crate::utils::MIN_HMAC_SHA256_KEY_BYTES {
+            return Err(crate::Error::InvalidKey(format!(
+                "HMAC-SHA256 key is too short: {} bytes (minimum {})",
+                secret.len(),
+                crate::utils::MIN_HMAC_SHA256_KEY_BYTES
+            )));
+        }
+        Ok(VerifyingKey::HmacSha256(secret))
+    }
+
+    /// An ES256 public key, checked to be a valid SPKI DER-encoded P-256 key.
+    ///
+    /// Validating at construction surfaces a bad key when it is configured,
+    /// rather than as a verification failure on the first token.
+    pub fn es256_spki(der: &'a [u8]) -> Result<Self, crate::Error> {
+        crate::utils::check_es256_public_key(der)?;
+        Ok(VerifyingKey::Es256(der))
+    }
+
+    /// A PS256 public key, checked to be a valid SPKI DER-encoded RSA key of
+    /// at least 2048 bits. Requires the `ps256` feature.
+    #[cfg(feature = "ps256")]
+    pub fn ps256_spki(der: &'a [u8]) -> Result<Self, crate::Error> {
+        crate::utils::check_ps256_public_key(der)?;
+        Ok(VerifyingKey::Ps256(der))
+    }
+}
+
 impl fmt::Debug for VerifyingKey<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {

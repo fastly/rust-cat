@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (RUSTSEC-2023-0071), so consumers that don't need PS256 can set
   `default-features = false`. Without the feature, PS256 signing and
   verification return `Error::InvalidAlgorithm`.
+- Checked `VerifyingKey` constructors that validate key material up front:
+  `VerifyingKey::es256_spki` and `ps256_spki` (with the `ps256` feature) parse
+  the SPKI DER key, and the PS256 one enforces the 2048-bit minimum.
+  `VerifyingKey::hmac_sha256` requires at least 32 bytes (RFC 7518 §3.2). They
+  return `Error::InvalidKey`. The enum variants remain available unchecked.
 - `examples/asymmetric_signing.rs` and `examples/sample_es256_ps256_tokens.rs`
   demonstrating the new asymmetric algorithms and key formats.
 
