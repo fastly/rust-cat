@@ -1611,6 +1611,9 @@ fn decode_map(bytes: &[u8]) -> Result<HeaderMap, Error> {
 /// COSE and CAT structures nest only a few levels; 32 leaves ample headroom.
 const MAX_NESTING_DEPTH: usize = 32;
 
+/// Upper bound on the capacity reserved up front for a decoded array.
+const MAX_PREALLOCATED_ITEMS: usize = 16;
+
 /// Read a definite container length, rejecting lengths the remaining input
 /// can't possibly hold (each item takes at least `min_item_bytes`). This keeps
 /// a declared length from driving allocation or iteration beyond the input.
@@ -1642,7 +1645,11 @@ fn decode_array(dec: &mut Decoder<'_>, depth: usize) -> Result<Vec<CborValue>, E
     }
     let array_len = dec.array()?;
     let array_len = container_len(dec, array_len, 1, "array")?;
-    let mut array = Vec::with_capacity(array_len);
+    // Don't size the Vec from the declared length: nested arrays would each
+    // reserve room for the whole remaining input at once, multiplying memory
+    // use far beyond the input size before the token is rejected. Grow as
+    // items are actually decoded instead.
+    let mut array = Vec::with_capacity(array_len.min(MAX_PREALLOCATED_ITEMS));
 
     for _ in 0..array_len {
         // Try to decode based on the datatype
