@@ -90,3 +90,61 @@ fn test_untagged_and_cwt_only_tokens_are_still_accepted() {
         assert!(Token::from_bytes(&cwt_only).is_ok());
     }
 }
+
+/// Re-wrap a token's 4-element array in exactly `tags` (outermost first).
+fn with_tags(alg: Algorithm, tags: &[u64]) -> Vec<u8> {
+    let body = token_bytes(alg)[3..].to_vec(); // drop tags 61 and 17/18
+    let mut out = Vec::new();
+    let mut enc = minicbor::Encoder::new(&mut out);
+    for tag in tags {
+        enc.tag(minicbor::data::Tag::new(*tag)).unwrap();
+    }
+    out.extend_from_slice(&body);
+    out
+}
+
+#[test]
+fn test_accepted_leading_tag_forms() {
+    for (alg, structure) in [(Algorithm::HmacSha256, 17), (Algorithm::Es256, 18)] {
+        for tags in [&[][..], &[61], &[structure], &[61, structure]] {
+            assert!(
+                Token::from_bytes(&with_tags(alg, tags)).is_ok(),
+                "{alg:?} with tags {tags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_unexpected_leading_tags_are_rejected() {
+    for (alg, structure, other) in [(Algorithm::HmacSha256, 17, 18), (Algorithm::Es256, 18, 17)] {
+        let refused: [&[u64]; 9] = [
+            // Something other than the CWT tag in its place
+            &[189, structure],
+            &[98, structure],
+            &[24, structure],
+            &[24],
+            // Tags in the wrong order or repeated
+            &[structure, 61],
+            &[61, 61],
+            &[other, structure],
+            // Three tags
+            &[61, 61, structure],
+            &[61, structure, structure],
+        ];
+        for tags in refused {
+            assert!(
+                matches!(
+                    Token::from_bytes(&with_tags(alg, tags)),
+                    Err(Error::InvalidFormat(_))
+                ),
+                "{alg:?} with tags {tags:?}"
+            );
+        }
+        // A structure tag of the wrong class is still a typed mismatch
+        assert!(matches!(
+            Token::from_bytes(&with_tags(alg, &[61, other])),
+            Err(Error::StructureTagMismatch { .. })
+        ));
+    }
+}
