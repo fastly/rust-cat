@@ -1,0 +1,21 @@
+[package]
+name = "common-access-token-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.common-access-token]
+path = ".."
+
+[[bin]]
+name = "decode_token"
+path = "fuzz_targets/decode_token.rs"
+test = false
+doc = false
+bench = false
