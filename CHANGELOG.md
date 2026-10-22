@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or a COSE_Sign1 (18) tag with HMAC, now fails with the new
   `Error::StructureTagMismatch { tag, algorithm, expected }`.
   Untagged and CWT-tag-only tokens are accepted as before.
+- `Token::from_bytes` only accepts these leading-tag layouts: no tags, a COSE
+  structure tag (17 or 18; optional per RFC 9052 §2), or the CWT tag (61)
+  followed by 17 or 18 (RFC 8392 §6). A bare CWT tag is still accepted for
+  compatibility with existing tokens, although RFC 8392 §6 requires a COSE tag
+  after it. Other tags, tags in the wrong order, and more than two tags are
+  rejected with `Error::InvalidFormat`. Previously any
+  0–2 tags were skipped, so for example `[17, 61]` or `[24, 17]` decoded, and
+  with two structure tags the last one won.
 
 ## [0.2.7] - 2025-11-05
 

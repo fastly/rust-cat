@@ -79,7 +79,7 @@ impl Token {
             Error::InvalidFormat("Missing algorithm in protected header".to_string())
         })?;
         // Apply CWT tag (61)
-        enc.tag(minicbor::data::Tag::new(61))?;
+        enc.tag(minicbor::data::Tag::new(CWT_TAG))?;
         // The COSE structure tag is owned by the algorithm's class (see
         // `AlgorithmClass::cbor_tag`), keeping it in sync with the matching
         // context string used in the signed input.
@@ -114,27 +114,45 @@ impl Token {
     /// Decode a token from CBOR bytes
     ///
     /// This function supports both COSE_Sign1 (tag 18) and COSE_Mac0 (tag 17) structures,
-    /// optionally preceded by the CWT tag (61), as well as untagged input. If a
+    /// optionally preceded by the CWT tag (61), as well as untagged input. Any other
+    /// leading tag, tag order, or more than two tags is rejected with
+    /// [`Error::InvalidFormat`]. If a
     /// COSE_Mac0 or COSE_Sign1 tag is present, it must match the class of the
     /// protected header's algorithm (MAC or signature); a mismatch is rejected
     /// with [`Error::StructureTagMismatch`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let mut dec = Decoder::new(bytes);
 
-        // Accept up to two leading tags (e.g. CWT = 61 followed by COSE_Mac0 = 17
-        // or COSE_Sign1 = 18), remembering any COSE structure tag so it can be
-        // checked against the algorithm below.
-        let mut structure_tag = None;
-        for _ in 0..2 {
-            if dec.datatype()? != minicbor::data::Type::Tag {
-                break;
+        // Accepted leading tags: none, a COSE structure tag (COSE_Mac0 = 17 or
+        // COSE_Sign1 = 18; optional per RFC 9052 §2), or the CWT tag (61)
+        // followed by one (RFC 8392 §6). Any other tag, order or count is
+        // malformed. The structure tag is checked against the algorithm below.
+        let mut tags = [0u64; 2];
+        let mut tag_count = 0;
+        while dec.datatype()? == minicbor::data::Type::Tag {
+            if tag_count == tags.len() {
+                return Err(Error::InvalidFormat(
+                    "more than two leading CBOR tags".to_string(),
+                ));
             }
-            let tag = dec.tag()?.as_u64();
-            if tag == AlgorithmClass::Mac.cbor_tag() || tag == AlgorithmClass::Signature.cbor_tag()
-            {
-                structure_tag = Some(tag);
-            }
+            tags[tag_count] = dec.tag()?.as_u64();
+            tag_count += 1;
         }
+        let is_structure_tag = |tag: u64| {
+            tag == AlgorithmClass::Mac.cbor_tag() || tag == AlgorithmClass::Signature.cbor_tag()
+        };
+        let structure_tag = match &tags[..tag_count] {
+            // A bare CWT tag is still accepted for compatibility with existing
+            // tokens, although RFC 8392 §6 requires a COSE tag after it.
+            [] | [CWT_TAG] => None,
+            [tag] | [CWT_TAG, tag] if is_structure_tag(*tag) => Some(*tag),
+            other => {
+                return Err(Error::InvalidFormat(format!(
+                    "unexpected leading CBOR tags {other:?}: expected an optional CWT tag (61) \
+                     followed by an optional COSE_Mac0 (17) or COSE_Sign1 (18) tag"
+                )))
+            }
+        };
 
         // Expect array with 4 items
         let array_len = dec.array()?.unwrap_or(0);
@@ -1569,6 +1587,9 @@ fn protected_matches(bytes: &[u8], protected: &HeaderMap) -> bool {
         Err(_) => false,
     }
 }
+
+/// CBOR tag for a CWT (RFC 8392 §6)
+const CWT_TAG: u64 = 61;
 
 fn encode_map(map: &HeaderMap) -> Result<Vec<u8>, Error> {
     let mut buf = Vec::new();
