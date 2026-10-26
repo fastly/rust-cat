@@ -2055,7 +2055,7 @@ fn test_es256_signatures_are_low_s() {
             crate::utils::compute_es256(&private_key, &[i, i.wrapping_mul(7), 0xAB]).expect("sign");
         let sig = Signature::from_slice(&sig_bytes).expect("64-byte signature");
         assert!(
-            sig.normalize_s().is_none(),
+            sig.normalize_s() == sig,
             "compute_es256 must emit low-S signatures (iteration {i})"
         );
     }
@@ -2081,9 +2081,9 @@ fn test_es256_high_s_signature_is_rejected() {
     let low_s = Signature::from_slice(&low_s_bytes).expect("64-byte signature");
     let (r, s) = low_s.split_scalars();
     let high_s = Signature::from_scalars(r, -s).expect("non-zero scalars");
-    // The twin really is the high-S form (normalize_s would flip it back).
+    // The twin really is the high-S form (normalize_s flips it back).
     assert!(
-        high_s.normalize_s().is_some(),
+        high_s.normalize_s() != high_s,
         "negated-s signature should be high-S"
     );
     let high_s_bytes = high_s.to_bytes().to_vec();

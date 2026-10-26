@@ -40,9 +40,8 @@ pub fn compute_es256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     // ECDSA signing with the RustCrypto `ecdsa` crate is deterministic (RFC 6979),
     // so no RNG is required here.
     let signature: Signature = signing_key.sign(data);
-    // Normalize to low-S. `normalize_s` returns `Some` only when the signature
-    // was high-S; otherwise the original (already low-S) signature is used.
-    let signature = signature.normalize_s().unwrap_or(signature);
+    // Normalize to low-S (a no-op if the signature is already low-S).
+    let signature = signature.normalize_s();
     Ok(signature.to_bytes().to_vec())
 }
 
@@ -63,10 +62,10 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
     let verifying_key = VerifyingKey::from_public_key_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid ES256 public key: {e}")))?;
     let signature = Signature::from_slice(signature).map_err(|_| Error::SignatureVerification)?;
-    // Reject high-S (non-canonical) signatures. `normalize_s` returns `Some`
-    // exactly when the signature is high-S, so a `Some` here means the input
-    // was malleable and must not be accepted.
-    if signature.normalize_s().is_some() {
+    // Reject high-S (non-canonical) signatures: normalizing changes a
+    // signature exactly when it is high-S, which means the input was
+    // malleable and must not be accepted.
+    if signature.normalize_s() != signature {
         return Err(Error::SignatureVerification);
     }
     verifying_key
