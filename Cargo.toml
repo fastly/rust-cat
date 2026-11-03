@@ -14,7 +14,9 @@ categories = ["authentication", "cryptography", "web-programming"]
 rust-version = "1.88.0"
 
 [dependencies]
-minicbor = { version = "2.3.0", features = ["derive", "std"] }
+minicbor = { version = "2.3.0", features = ["derive", "std", "half"] }
+# Half-precision float support (deterministic CBOR float encoding)
+half = { version = "2.4", default-features = false }
 hmac-sha256 = "1.1.14"
 hmac-sha512 = "1.1.12"
 thiserror = "2"

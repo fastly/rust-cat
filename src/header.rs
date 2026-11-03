@@ -289,7 +289,12 @@ impl KeyId {
 /// map.insert(1, CborValue::Text("nested value".to_string()));
 /// let map_value = CborValue::Map(map);
 /// ```
+///
+/// This enum is marked `#[non_exhaustive]`: new CBOR value kinds can be added
+/// without it being a breaking change, so downstream `match` expressions must
+/// include a wildcard arm.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CborValue {
     /// Integer value (signed 64-bit integer)
     Integer(i64),
@@ -303,6 +308,11 @@ pub enum CborValue {
     Array(Vec<CborValue>),
     /// Null value
     Null,
+    /// Floating-point value (decoded from half, single, or double precision)
+    ///
+    /// Encoded using the shortest of half, single, or double precision that
+    /// represents the value exactly, as deterministic CBOR requires.
+    Float(f64),
 }
 
 /// Type alias for header maps

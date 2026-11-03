@@ -5,6 +5,47 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **Media over QUIC (MoQ)** support for draft-ietf-moq-c4m-02 (only -02;
+  claims in draft -01's array form are rejected):
+  - The `moqt` module with typed `MoqtClaim` / `MoqtScope` / `BinMatch` scopes,
+    `MoqtAction` codes (SETUP = 1 through SUBSCRIBE_TRACKS = 9), and
+    `MoqtRequest`. The claim is encoded as a map, `{0: [scopes...]}`. Parsing
+    is strict, and any other map key is rejected. Matching is bytewise against
+    Full Track Names.
+  - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
+  - `MoqtScope::matches_name`, the action-independent name matcher that
+    `permits` uses, for re-checking namespaces and tracks against a scope.
+  - `Token::moqt_claim` and `Token::moqt_reval`.
+  - `VerificationOptions::{verify_moqt, moqt_request, moqt_revalidation,
+    moqt_claim_labels}`. `MoqtClaimLabels` overrides the provisional claim
+    labels, and `Token::moqt_claim_at` / `moqt_reval_at` read a claim at any
+    label.
+    With `verify_moqt`, tokens without a `moqt` claim are denied.
+  - `VerificationOptions::moqt_dpop_verified`. With `verify_moqt`, tokens with
+    a `cnf` claim are denied unless the caller confirms it has verified the
+    DPoP proof.
+  - With `verify_moqt`, tokens with `catreplay` 1 (single connection) must
+    carry `cti` and `exp`.
+  - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`,
+    `Error::MoqtRevalidationUnsupported`, and `Error::MoqtDpopRequired`.
+  - New constants `moqt_keys`, `moqt_claim_keys`, `moqt_actions`,
+    `moqt_match_types`, and `cwt_keys::CNF`. The claim keys -65537 and -65538
+    are the draft's Private Use placeholders, pending IANA.
+  - `examples/moqt.rs`.
+- `CborValue::Float`. Half, single, and double precision floats are decoded, and
+  floats are encoded in the shortest exact width.
+
+### Changed
+
+- **BREAKING:** `CborValue` is now `#[non_exhaustive]` and gained a `Float`
+  variant.
+- **BREAKING:** `VerificationOptions` has new public fields, so struct literals
+  must use `..Default::default()` or the builder methods.
+
 ## [0.3.0] - Unreleased
 
 ### Added

@@ -83,6 +83,23 @@ pub enum Error {
     #[error("Invalid TLS Fingerprint claim: {0}")]
     InvalidTLSFingerprintClaim(String),
 
+    /// Invalid MoQ Transport (moqt or moqt-reval) claim
+    #[error("Invalid MoQ claim: {0}")]
+    InvalidMoqtClaim(String),
+
+    /// MoQ Transport action not authorized by any moqt scope
+    #[error("MoQ action not authorized: {0}")]
+    MoqtNotAuthorized(String),
+
+    /// MoQ Transport revalidation interval cannot be honored by this recipient
+    #[error("MoQ revalidation not supported: {0}")]
+    MoqtRevalidationUnsupported(String),
+
+    /// MoQ token is bound to a client key (`cnf`) but no verified DPoP proof
+    /// was confirmed
+    #[error("MoQ DPoP proof required: {0}")]
+    MoqtDpopRequired(String),
+
     /// Other error
     #[error("Other error: {0}")]
     Other(String),

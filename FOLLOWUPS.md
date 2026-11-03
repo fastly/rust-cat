@@ -151,3 +151,90 @@ prefixes (with implicit size ceilings) that `minicbor::Encoder` already produces
 Low risk today, but they can drift from what the library emits. Test-only.
 
 - Location: `src/tests.rs`.
+
+## MoQ (draft-ietf-moq-c4m-02) — deferred from the initial `moqt` support
+
+### Composite claims (`or` / `and` / `nor` / `crit`)
+
+The draft uses draft-lemmons-cose-composite-claims-03 to bind different `exp`
+values to different `moqt` scopes. Its §2.1.1 also uses `or` to offer
+alternative `moqt` formats, so that a recipient that rejects one claim set can
+accept another. All composite claim keys are still TBD. The -02 Appendix A.6
+vectors encode them as 0, which deliberately fails to parse.
+
+- **Fix direction:** evaluate nested claim sets recursively, with a depth limit
+  of at least 4. A `moqt` claim with an unknown map key makes only its own
+  claim set unacceptable, not the whole token. Reject `moqt-reval` inside
+  composite claims; the draft makes such tokens not well-formed.
+
+### DPoP proof verification
+
+Today, under `verify_moqt`, a token with a `cnf` claim is rejected unless the
+caller sets `moqt_dpop_verified`. Draft -02 §4 replaced the JWT proof with a
+COSE-native one, so the crate can now verify proofs without a JWT/JWK stack:
+
+- **Proof structure:** a COSE_Sign1 with `typ` (16) `"dpop-proof+cwt"`, an
+  asymmetric `alg` (ES256 required), and the client key as a COSE_Key in `kccs`
+  (14).
+- **Binding:** match the key to the token's `cnf`.
+  - `ckt` (5) is the RFC 9679 COSE Key Thumbprint, and relays MUST support it.
+  - `jkt` is the RFC 7638 JWK thumbprint of `crv`, `kty`, `x` and `y`, and
+    relays SHOULD support it.
+- **Freshness:** `ath` must be the SHA-256 of the token bytes as presented,
+  `iat` must fall within the `catdpop` window, and `cti` is used for replay
+  detection.
+- **Action match:** `actx` = `{0: "moqt", 1: action, ?2: namespace, ?3: track}`
+  must equal the request, so it can reuse `MoqtRequest`.
+
+- **Blockers:** the `actx` and `ath` claim keys are TBD. -02 publishes no
+  proof vectors, only token-side `cnf` vectors (A.4, which put `jkt` under key
+  323).
+
+### Spec ambiguities to revisit as the draft evolves
+
+- Whether namespace and track matches apply to session and namespace actions.
+  -02 is still silent. The current implementation ignores them for SETUP and
+  ignores the track match for namespace actions (including SUBSCRIBE_TRACKS);
+  see the `moqt` module docs. The `actx` rule in -02 §4.2 points to the same
+  split: it carries the namespace for namespace and track actions, and the
+  track only for track actions.
+- The final IANA claim keys. The defaults, -65537 and -65538, are the -02 test
+  vectors' Private Use placeholders.
+
+### REQUEST_UPDATE on namespace subscriptions
+
+`MoqtAction::RequestUpdate` is a track action, so a `MoqtRequest` without a
+track name is always denied. In moq-transport-22, REQUEST_UPDATE can also
+update a namespace subscription (§9.5.2), and it can change the namespace
+prefix. A relay that checks such an update as `RequestUpdate` gets a denial
+even when the token allows it. This fails closed, but it blocks legitimate
+updates.
+
+- **Why deferred:** the spec doesn't say how this should be authorized; it's
+  tracked upstream in moq-wg/CAT-4-MOQT#49. Is the token checked against the
+  new prefix, the original one, or both? Does REQUEST_UPDATE need to be listed
+  as well as the original SUBSCRIBE_NAMESPACE / SUBSCRIBE_TRACKS action? Any
+  fix now would hard-code a guess.
+- **Workaround until then:** `permits` derives the target from the action, so
+  even `MoqtRequest::namespace(MoqtAction::RequestUpdate, ..)` is denied.
+  Instead, select the scopes whose `action_codes()` include both
+  REQUEST_UPDATE and the original action, and call
+  `MoqtScope::matches_name(new_prefix, None)` on them.
+- **Likely fix direction:** make `RequestUpdate`'s target depend on the
+  request: namespace-only when `track` is `None`, track otherwise. Then
+  require the new prefix to match a scope that permits both REQUEST_UPDATE and
+  the original action.
+
+### Draft -02 errata to report upstream
+
+- In §2.1.2, the "namespaces starting with ['example','com']" example uses the
+  map form `{ /exact/ 0: 'example.com' }`. The CDDL only allows a bare `bstr`
+  (this library rejects the map form).
+- Several §2.1.2 examples still label code 2 `/ANNOUNCE/`.
+- `moqt_admin_wildcard` (A.5) still lists actions `[0..8]` with the -01 names
+  ClientSetup and ServerSetup, and expects action 0 to pass. It also omits
+  SUBSCRIBE_TRACKS (9).
+- The IANA table gives `moqt-reval`'s key as `TBD_MOQT (1+2)` instead of
+  `TBD_MOQT_REVAL`.
+- §2.1.3 says `exp` 1750000000 is 2025-05-02T21:57:24Z. It is actually
+  2025-06-15T15:06:40Z.

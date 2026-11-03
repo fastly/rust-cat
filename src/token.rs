@@ -14,6 +14,8 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::Path;
 
+use crate::moqt::{parse_moqt_reval, MoqtClaim, MoqtClaimLabels, MoqtRequest, MoqtRevalidation};
+
 /// Common Access Token structure
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -330,7 +332,71 @@ impl Token {
             self.verify_cattprint_claim(options)?;
         }
 
+        if options.verify_moqt {
+            self.verify_moqt_claims(options)?;
+        }
+
         Ok(())
+    }
+
+    /// Verify the MoQ Transport claims (moqt and moqt-reval) against the
+    /// provided request and revalidation capability
+    fn verify_moqt_claims(&self, options: &VerificationOptions) -> Result<(), Error> {
+        use crate::constants::{cat_keys, cwt_keys, replay_values};
+
+        let request = options.moqt_request.as_ref().ok_or_else(|| {
+            Error::InvalidClaimValue("No MoQ request provided for moqt verification".to_string())
+        })?;
+
+        // draft-ietf-moq-c4m-02 §4.1: a token bound to a client key with cnf
+        // must not be accepted without a valid DPoP proof. This library does
+        // not verify proofs, so the caller must confirm it has.
+        if self.claims.custom.contains_key(&cwt_keys::CNF) && !options.moqt_dpop_verified {
+            return Err(Error::MoqtDpopRequired(format!(
+                "token has a cnf claim, so {request} needs a verified DPoP proof"
+            )));
+        }
+
+        // draft-ietf-moq-c4m-02 §3: under MoQ, catreplay 1 means
+        // single-connection use, and such a token must carry cti and exp.
+        if matches!(
+            self.claims.custom.get(&cat_keys::CATREPLAY),
+            Some(CborValue::Integer(v)) if *v == i64::from(replay_values::PROHIBITED)
+        ) && (self.claims.registered.cti.is_none() || self.claims.registered.exp.is_none())
+        {
+            return Err(Error::InvalidClaimValue(
+                "catreplay 1 (single connection) requires both cti and exp claims".to_string(),
+            ));
+        }
+
+        let labels = options.moqt_claim_labels;
+        if let Some(reval) = self.moqt_reval_at(labels.reval)? {
+            match options.moqt_revalidation {
+                MoqtRevalidation::Unsupported => {
+                    return Err(Error::MoqtRevalidationUnsupported(format!(
+                        "token requires revalidation every {reval}s but this recipient cannot revalidate"
+                    )))
+                }
+                MoqtRevalidation::MinInterval(min) if reval < min as f64 => {
+                    return Err(Error::MoqtRevalidationUnsupported(format!(
+                        "token requires revalidation every {reval}s, shorter than the supported minimum of {min}s"
+                    )))
+                }
+                MoqtRevalidation::MinInterval(_) => {}
+            }
+        }
+
+        match self.moqt_claim_at(labels.moqt)? {
+            Some(claim) if claim.permits(request) => Ok(()),
+            Some(_) => Err(Error::MoqtNotAuthorized(format!(
+                "no moqt scope permits {request}"
+            ))),
+            // draft-ietf-moq-c4m §2: once a token is presented, all actions
+            // are blocked unless a scope explicitly enables them.
+            None => Err(Error::MoqtNotAuthorized(format!(
+                "token has no moqt claim, so {request} is blocked"
+            ))),
+        }
     }
 
     /// Verify the CATU (URI) claim against the provided URI
@@ -1176,6 +1242,43 @@ impl Token {
     pub fn has_custom_claim(&self, key: i32) -> bool {
         self.claims.custom.contains_key(&key)
     }
+
+    /// Parse the MoQ Transport scope (moqt) claim, if present
+    ///
+    /// Relays that check many actions against a session-held token can parse
+    /// this once and call [`MoqtClaim::permits`] per action. Note that this
+    /// skips the time-based checks that [`Token::verify_claims`] performs.
+    pub fn moqt_claim(&self) -> Result<Option<MoqtClaim>, Error> {
+        self.moqt_claim_at(MoqtClaimLabels::default().moqt)
+    }
+
+    /// Parse a moqt claim stored under `label` instead of the default label
+    pub fn moqt_claim_at(&self, label: i32) -> Result<Option<MoqtClaim>, Error> {
+        self.claims
+            .custom
+            .get(&label)
+            .map(MoqtClaim::from_cbor)
+            .transpose()
+    }
+
+    /// The MoQ Transport revalidation interval (moqt-reval) in seconds
+    ///
+    /// Returns `None` if the claim is absent or 0, meaning the token must not
+    /// be revalidated. Otherwise the recipient must re-run
+    /// [`Token::verify_claims`] at least this often for ongoing actions and
+    /// stop them once the token is no longer acceptable. The signature check
+    /// may be skipped on revalidation if the trusted keys have not changed.
+    pub fn moqt_reval(&self) -> Result<Option<f64>, Error> {
+        self.moqt_reval_at(MoqtClaimLabels::default().reval)
+    }
+
+    /// Read a moqt-reval claim stored under `label` instead of the default label
+    pub fn moqt_reval_at(&self, label: i32) -> Result<Option<f64>, Error> {
+        match self.claims.custom.get(&label) {
+            Some(value) => parse_moqt_reval(value),
+            None => Ok(None),
+        }
+    }
 }
 
 /// Options for token verification
@@ -1206,6 +1309,11 @@ pub struct VerificationOptions {
     /// Verify CAT-specific replay protection (CATREPLAY)
     pub verify_catreplay: bool,
     /// Whether the token has been seen before (for replay protection)
+    ///
+    /// For MoQ (draft-ietf-moq-c4m-02 §3), `catreplay` 1 means single
+    /// *connection* use. A relay should set this only when the token's `cti`
+    /// was already accepted on a different connection. It should not set it
+    /// when a later action on the same connection presents the token again.
     pub token_seen_before: bool,
     /// Verify CAT-specific TLS Fingerprint claim (CATTPRINT) against provided Fingerprint Type and Value
     pub verify_cattprint: bool,
@@ -1213,6 +1321,23 @@ pub struct VerificationOptions {
     pub fingerprint_type: Option<FingerprintType>,
     /// Fingerprint Value to verify against CATTPRINT claim
     pub fingerprint_value: Option<String>,
+    /// Verify MoQ Transport claims (moqt, moqt-reval) against `moqt_request`
+    ///
+    /// Tokens without a moqt claim are denied. Tokens with a `cnf` claim are
+    /// denied unless `moqt_dpop_verified` is set. Tokens with `catreplay` 1
+    /// but no `cti` or no `exp` are rejected.
+    pub verify_moqt: bool,
+    /// MoQ request to verify against the moqt claim
+    pub moqt_request: Option<MoqtRequest>,
+    /// This recipient's ability to honor the moqt-reval claim
+    pub moqt_revalidation: MoqtRevalidation,
+    /// Labels under which the moqt and moqt-reval claims are read
+    pub moqt_claim_labels: MoqtClaimLabels,
+    /// Whether the caller has verified the DPoP proof for this MoQ action
+    ///
+    /// This library does not verify DPoP proofs. Under `verify_moqt`, a token
+    /// with a `cnf` claim is rejected unless this is `true`.
+    pub moqt_dpop_verified: bool,
 }
 
 impl VerificationOptions {
@@ -1235,6 +1360,11 @@ impl VerificationOptions {
             verify_cattprint: false,
             fingerprint_type: None,
             fingerprint_value: None,
+            verify_moqt: false,
+            moqt_request: None,
+            moqt_revalidation: MoqtRevalidation::Unsupported,
+            moqt_claim_labels: MoqtClaimLabels::default(),
+            moqt_dpop_verified: false,
         }
     }
 
@@ -1333,6 +1463,49 @@ impl VerificationOptions {
         self.fingerprint_value = Some(fingerprint_value.into());
         self
     }
+
+    /// Set whether to verify MoQ Transport claims (moqt, moqt-reval)
+    ///
+    /// When enabled, a request is permitted only if a moqt scope enables it.
+    /// As draft-ietf-moq-c4m requires, a token without a moqt claim
+    /// authorizes no MoQ action.
+    pub fn verify_moqt(mut self, verify: bool) -> Self {
+        self.verify_moqt = verify;
+        self
+    }
+
+    /// Set the MoQ request to verify against the moqt claim
+    pub fn moqt_request(mut self, request: MoqtRequest) -> Self {
+        self.moqt_request = Some(request);
+        self
+    }
+
+    /// Set this recipient's ability to honor the moqt-reval claim
+    pub fn moqt_revalidation(mut self, revalidation: MoqtRevalidation) -> Self {
+        self.moqt_revalidation = revalidation;
+        self
+    }
+
+    /// Set the labels under which the moqt and moqt-reval claims are read
+    ///
+    /// Defaults to the provisional labels -65537 and -65538 (see
+    /// [`MoqtClaimLabels`]).
+    pub fn moqt_claim_labels(mut self, labels: MoqtClaimLabels) -> Self {
+        self.moqt_claim_labels = labels;
+        self
+    }
+
+    /// Confirm that the DPoP proof accompanying this MoQ action was verified
+    ///
+    /// Under draft-ietf-moq-c4m-02 §4.1, a relay must not accept a token that
+    /// has a `cnf` claim unless the action comes with a valid DPoP proof. This
+    /// library does not verify DPoP proofs, so it rejects such tokens unless
+    /// the caller sets this. Set it only after you have performed every check
+    /// in §4.3.
+    pub fn moqt_dpop_verified(mut self, verified: bool) -> Self {
+        self.moqt_dpop_verified = verified;
+        self
+    }
 }
 
 /// Builder for creating tokens
@@ -1405,6 +1578,23 @@ impl TokenBuilder {
     /// Add a custom claim with an array value
     pub fn custom_array(mut self, key: i32, value: Vec<CborValue>) -> Self {
         self.claims.custom.insert(key, CborValue::Array(value));
+        self
+    }
+
+    /// Set the MoQ Transport scope (moqt) claim
+    pub fn moqt(mut self, claim: MoqtClaim) -> Self {
+        self.claims
+            .custom
+            .insert(crate::constants::moqt_keys::MOQT, claim.to_cbor());
+        self
+    }
+
+    /// Set the MoQ Transport revalidation interval (moqt-reval) in seconds
+    pub fn moqt_reval(mut self, seconds: u64) -> Self {
+        self.claims.custom.insert(
+            crate::constants::moqt_keys::MOQT_REVAL,
+            CborValue::Integer(i64::try_from(seconds).unwrap_or(i64::MAX)),
+        );
         self
     }
 
@@ -1632,6 +1822,22 @@ fn encode_cbor_value(value: &CborValue, enc: &mut Encoder<&mut Vec<u8>>) -> Resu
         CborValue::Null => {
             enc.null()?;
         }
+        CborValue::Float(f) => {
+            encode_float(*f, enc)?;
+        }
+    }
+    Ok(())
+}
+
+/// Encode a float using the shortest of half, single, or double precision
+/// that represents it exactly (RFC 8949 §4.2.2 preferred serialization).
+fn encode_float(f: f64, enc: &mut Encoder<&mut Vec<u8>>) -> Result<(), Error> {
+    if f.is_nan() || f64::from(half::f16::from_f64(f)) == f {
+        enc.f16(f as f32)?;
+    } else if f64::from(f as f32) == f {
+        enc.f32(f as f32)?;
+    } else {
+        enc.f64(f)?;
     }
     Ok(())
 }
@@ -1702,6 +1908,12 @@ fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
             // Null value
             dec.null()?;
             CborValue::Null
+        } else if datatype == minicbor::data::Type::F16
+            || datatype == minicbor::data::Type::F32
+            || datatype == minicbor::data::Type::F64
+        {
+            // Floating-point value (any width widens losslessly to f64)
+            CborValue::Float(dec.f64()?)
         } else {
             // Unsupported type
             return Err(Error::InvalidFormat(format!(
@@ -1766,6 +1978,12 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
             // Null value
             dec.null()?;
             CborValue::Null
+        } else if datatype == minicbor::data::Type::F16
+            || datatype == minicbor::data::Type::F32
+            || datatype == minicbor::data::Type::F64
+        {
+            // Floating-point value (any width widens losslessly to f64)
+            CborValue::Float(dec.f64()?)
         } else {
             // Unsupported type
             return Err(Error::InvalidFormat(format!(
