@@ -1,16 +1,25 @@
 //! # MoQ Transport claims (draft-ietf-moq-c4m)
 //!
 //! This module implements the `moqt` and `moqt-reval` claims defined by
-//! [draft-ietf-moq-c4m-01](https://datatracker.ietf.org/doc/draft-ietf-moq-c4m/),
+//! [draft-ietf-moq-c4m-02](https://datatracker.ietf.org/doc/draft-ietf-moq-c4m/02/),
 //! which profiles Common Access Tokens for Media over QUIC Transport (MoQT).
+//! Only draft -02 is supported. Draft -01 claims are rejected (see below).
 //!
-//! A `moqt` claim is a list of [`MoqtScope`]s. Each scope lists the MoQT
-//! actions it permits and, optionally, which Full Track Names it applies to:
+//! A `moqt` claim is a map whose key 0 holds a list of [`MoqtScope`]s. Each
+//! scope lists the MoQT actions it permits and, optionally, which Full Track
+//! Names it applies to:
 //!
 //! ```text
+//! moqt-value = { 0 => [ + moqt-scope ], * int => any }
 //! moqt-scope = [ moqt-actions, ? [ + moqt-ns-match ], ? moqt-track-match ]
 //! bin-match  = bstr / [ match-type, match-value ]   ; 1 = prefix, 2 = suffix
 //! ```
+//!
+//! Map keys other than 0 are reserved for future revisions of the draft. A
+//! claim containing any other key is rejected (draft §2.1.1, fail-closed). So
+//! is a claim in draft -01's bare-array form. Draft -01 numbered its actions
+//! differently, so reading one of its tokens as -02 could grant the wrong
+//! action.
 //!
 //! Matching is bytewise (case-sensitive, no normalization). A request is
 //! permitted if *any* scope permits it; once a token carrying a `moqt` claim
@@ -22,12 +31,12 @@
 //! namespace or track. This implementation scopes them by action kind (see
 //! [`MoqtAction::target`]):
 //!
-//! - **Session** actions (`CLIENT_SETUP`, `SERVER_SETUP`) only require the
-//!   action to be listed; namespace and track matches do not apply.
-//! - **Namespace** actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) must
-//!   also satisfy the namespace match; the track match does not apply. This is
-//!   what makes the draft's publisher example (`[[2, 6], ns, track]`) usable
-//!   for `PUBLISH_NAMESPACE`.
+//! - **Session** actions (`SETUP`) only require the action to be listed;
+//!   namespace and track matches do not apply.
+//! - **Namespace** actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`,
+//!   `SUBSCRIBE_TRACKS`) must also satisfy the namespace match; the track match
+//!   does not apply. This is what makes the draft's publisher example
+//!   (`[[2, 6], ns, track]`) usable for `PUBLISH_NAMESPACE`.
 //! - **Track** actions (`SUBSCRIBE`, `REQUEST_UPDATE`, `PUBLISH`, `FETCH`,
 //!   `TRACK_STATUS`) must satisfy both. A track action with no track name in
 //!   the request is always denied.
@@ -35,6 +44,10 @@
 //! A request namespace with fewer fields than the scope's namespace match is
 //! denied: for `SUBSCRIBE_NAMESPACE` that would grant more than the scope
 //! allows.
+//!
+//! The DPoP proof's `actx` claim in draft -02 §4.2 points to the same split. It
+//! carries the namespace for actions that target a namespace or a track, and
+//! the track name only for actions that target a track.
 //!
 //! ## Example
 //!
@@ -57,18 +70,17 @@
 //! assert!(!claim.permits(&subscribe));
 //! ```
 
-use crate::constants::{moqt_actions, moqt_keys, moqt_match_types};
+use crate::constants::{moqt_actions, moqt_claim_keys, moqt_keys, moqt_match_types};
 use crate::error::Error;
 use crate::header::CborValue;
+use std::collections::BTreeMap;
 
-/// A MoQ Transport action (draft-ietf-moq-c4m, Table 1)
+/// A MoQ Transport action (draft-ietf-moq-c4m-02, Table 1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MoqtAction {
-    /// CLIENT_SETUP (0)
-    ClientSetup,
-    /// SERVER_SETUP (1)
-    ServerSetup,
+    /// SETUP (1)
+    Setup,
     /// PUBLISH_NAMESPACE (2)
     PublishNamespace,
     /// SUBSCRIBE_NAMESPACE (3)
@@ -83,6 +95,8 @@ pub enum MoqtAction {
     Fetch,
     /// TRACK_STATUS (8)
     TrackStatus,
+    /// SUBSCRIBE_TRACKS (9)
+    SubscribeTracks,
 }
 
 /// What part of a Full Track Name an action operates on
@@ -100,8 +114,7 @@ impl MoqtAction {
     /// The action's integer code as carried in the `moqt` claim
     pub fn code(self) -> i64 {
         match self {
-            MoqtAction::ClientSetup => moqt_actions::CLIENT_SETUP,
-            MoqtAction::ServerSetup => moqt_actions::SERVER_SETUP,
+            MoqtAction::Setup => moqt_actions::SETUP,
             MoqtAction::PublishNamespace => moqt_actions::PUBLISH_NAMESPACE,
             MoqtAction::SubscribeNamespace => moqt_actions::SUBSCRIBE_NAMESPACE,
             MoqtAction::Subscribe => moqt_actions::SUBSCRIBE,
@@ -109,14 +122,14 @@ impl MoqtAction {
             MoqtAction::Publish => moqt_actions::PUBLISH,
             MoqtAction::Fetch => moqt_actions::FETCH,
             MoqtAction::TrackStatus => moqt_actions::TRACK_STATUS,
+            MoqtAction::SubscribeTracks => moqt_actions::SUBSCRIBE_TRACKS,
         }
     }
 
     /// Look up an action by its integer code
     pub fn from_code(code: i64) -> Option<Self> {
         Some(match code {
-            moqt_actions::CLIENT_SETUP => MoqtAction::ClientSetup,
-            moqt_actions::SERVER_SETUP => MoqtAction::ServerSetup,
+            moqt_actions::SETUP => MoqtAction::Setup,
             moqt_actions::PUBLISH_NAMESPACE => MoqtAction::PublishNamespace,
             moqt_actions::SUBSCRIBE_NAMESPACE => MoqtAction::SubscribeNamespace,
             moqt_actions::SUBSCRIBE => MoqtAction::Subscribe,
@@ -124,6 +137,7 @@ impl MoqtAction {
             moqt_actions::PUBLISH => MoqtAction::Publish,
             moqt_actions::FETCH => MoqtAction::Fetch,
             moqt_actions::TRACK_STATUS => MoqtAction::TrackStatus,
+            moqt_actions::SUBSCRIBE_TRACKS => MoqtAction::SubscribeTracks,
             _ => return None,
         })
     }
@@ -131,8 +145,10 @@ impl MoqtAction {
     /// Which parts of a scope's matches apply to this action
     pub fn target(self) -> MoqtTarget {
         match self {
-            MoqtAction::ClientSetup | MoqtAction::ServerSetup => MoqtTarget::Session,
-            MoqtAction::PublishNamespace | MoqtAction::SubscribeNamespace => MoqtTarget::Namespace,
+            MoqtAction::Setup => MoqtTarget::Session,
+            MoqtAction::PublishNamespace
+            | MoqtAction::SubscribeNamespace
+            | MoqtAction::SubscribeTracks => MoqtTarget::Namespace,
             MoqtAction::Subscribe
             | MoqtAction::RequestUpdate
             | MoqtAction::Publish
@@ -421,7 +437,7 @@ impl MoqtScope {
     }
 }
 
-/// The `moqt` claim: a list of scopes, any of which may permit a request
+/// The `moqt` claim: a set of scopes, any of which may permit a request
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoqtClaim {
     scopes: Vec<MoqtScope>,
@@ -446,25 +462,48 @@ impl MoqtClaim {
         self.scopes.iter().any(|s| s.permits(request))
     }
 
-    /// Encode the claim as a CBOR value
+    /// Encode the claim as a CBOR value (`{0: [scopes...]}`)
     pub fn to_cbor(&self) -> CborValue {
-        CborValue::Array(self.scopes.iter().map(MoqtScope::to_cbor).collect())
+        let mut map = BTreeMap::new();
+        map.insert(
+            moqt_claim_keys::SCOPES,
+            CborValue::Array(self.scopes.iter().map(MoqtScope::to_cbor).collect()),
+        );
+        CborValue::Map(map)
     }
 
     /// Parse a claim from a CBOR value
     ///
     /// Parsing is strict: any value outside the draft's grammar is rejected
     /// with [`Error::InvalidMoqtClaim`] rather than ignored, so a malformed
-    /// scope can never widen access.
+    /// scope can never widen access. Specifically:
+    ///
+    /// - The map may hold only key 0. Draft -02 §2.1.1 requires any other key
+    ///   to be rejected, because a future key might narrow the claim's scope.
+    /// - Draft -01's bare-array form is rejected.
     pub fn from_cbor(value: &CborValue) -> Result<Self, Error> {
-        match value {
-            CborValue::Array(scopes) if !scopes.is_empty() => Ok(Self {
+        let map = match value {
+            CborValue::Map(map) => map,
+            CborValue::Array(_) => {
+                return Err(invalid(
+                    "moqt claim is a bare array (draft-ietf-moq-c4m-01 form); \
+                     draft-02 requires a map {0: [scopes...]}",
+                ))
+            }
+            _ => return Err(invalid("moqt claim must be a map")),
+        };
+        if let Some(key) = map.keys().find(|k| **k != moqt_claim_keys::SCOPES) {
+            return Err(invalid(&format!("unknown key {key} in moqt claim")));
+        }
+        match map.get(&moqt_claim_keys::SCOPES) {
+            Some(CborValue::Array(scopes)) if !scopes.is_empty() => Ok(Self {
                 scopes: scopes
                     .iter()
                     .map(MoqtScope::from_cbor)
                     .collect::<Result<_, _>>()?,
             }),
-            _ => Err(invalid("moqt claim must be a non-empty array of scopes")),
+            Some(_) => Err(invalid("moqt scopes (key 0) must be a non-empty array")),
+            None => Err(invalid("moqt claim has no scopes (key 0)")),
         }
     }
 }
@@ -481,7 +520,7 @@ pub struct MoqtRequest {
 }
 
 impl MoqtRequest {
-    /// A session-level request, such as `CLIENT_SETUP`
+    /// A session-level request, such as `SETUP`
     pub fn session(action: MoqtAction) -> Self {
         Self {
             action,
@@ -519,8 +558,7 @@ impl MoqtRequest {
 impl std::fmt::Display for MoqtAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            MoqtAction::ClientSetup => "CLIENT_SETUP",
-            MoqtAction::ServerSetup => "SERVER_SETUP",
+            MoqtAction::Setup => "SETUP",
             MoqtAction::PublishNamespace => "PUBLISH_NAMESPACE",
             MoqtAction::SubscribeNamespace => "SUBSCRIBE_NAMESPACE",
             MoqtAction::Subscribe => "SUBSCRIBE",
@@ -528,6 +566,7 @@ impl std::fmt::Display for MoqtAction {
             MoqtAction::Publish => "PUBLISH",
             MoqtAction::Fetch => "FETCH",
             MoqtAction::TrackStatus => "TRACK_STATUS",
+            MoqtAction::SubscribeTracks => "SUBSCRIBE_TRACKS",
         })
     }
 }
@@ -567,9 +606,10 @@ pub enum MoqtRevalidation {
 
 /// The claim labels under which `moqt` and `moqt-reval` are read
 ///
-/// The defaults (327 and 328, from [`moqt_keys`]) are provisional values taken
-/// from the draft's test vectors; IANA has not yet assigned the labels. Override
-/// them to interoperate with issuers that use different labels in the meantime.
+/// The defaults (-65537 and -65538, from [`moqt_keys`]) are the Private Use
+/// placeholders from draft-ietf-moq-c4m-02's test vectors. IANA has not yet
+/// assigned the labels. Until it does, override the defaults to interoperate
+/// with issuers that use different labels.
 /// Issuers can write a claim at any label with
 /// [`TokenBuilder::custom_cbor`](crate::TokenBuilder::custom_cbor) and
 /// [`MoqtClaim::to_cbor`].

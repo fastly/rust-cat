@@ -95,6 +95,11 @@ pub enum Error {
     #[error("MoQ revalidation not supported: {0}")]
     MoqtRevalidationUnsupported(String),
 
+    /// MoQ token is bound to a client key (`cnf`) but no verified DPoP proof
+    /// was confirmed
+    #[error("MoQ DPoP proof required: {0}")]
+    MoqtDpopRequired(String),
+
     /// Other error
     #[error("Other error: {0}")]
     Other(String),

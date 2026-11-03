@@ -152,31 +152,65 @@ Low risk today, but they can drift from what the library emits. Test-only.
 
 - Location: `src/tests.rs`.
 
-## MoQ (draft-ietf-moq-c4m) — deferred from the initial `moqt` support
+## MoQ (draft-ietf-moq-c4m-02) — deferred from the initial `moqt` support
 
 ### Composite claims (`or` / `and` / `nor` / `crit`)
 
-The draft uses draft-lemmons-cose-composite-claims to bind different `exp` values
-to different `moqt` scopes. All of those claim keys are still TBD.
+The draft uses draft-lemmons-cose-composite-claims-03 to bind different `exp`
+values to different `moqt` scopes. Its §2.1.1 also uses `or` to offer
+alternative `moqt` formats, so that a recipient that rejects one claim set can
+accept another. All composite claim keys are still TBD. The -02 Appendix A.6
+vectors encode them as 0, which deliberately fails to parse.
 
 - **Fix direction:** evaluate nested claim sets recursively, with a depth limit
-  of at least 4. Reject `moqt-reval` inside composite claims; the draft makes
-  such tokens not well-formed.
+  of at least 4. A `moqt` claim with an unknown map key makes only its own
+  claim set unacceptable, not the whole token. Reject `moqt-reval` inside
+  composite claims; the draft makes such tokens not well-formed.
 
 ### DPoP proof verification
 
-Tokens can be bound to a client key with `cnf.jkt` (key 8 / 3) and `catdpop`.
-Validators then check a `dpop-proof+jwt` whose `actx` names the MoQT action,
-`tns`, and `tn`.
+Today, under `verify_moqt`, a token with a `cnf` claim is rejected unless the
+caller sets `moqt_dpop_verified`. Draft -02 §4 replaced the JWT proof with a
+COSE-native one, so the crate can now verify proofs without a JWT/JWK stack:
 
-- **Fix direction:** this needs a JWT/JWK stack, so build it as a feature-gated
-  module or a separate crate. It can reuse `MoqtRequest` to check `actx`. Until
-  it exists, forwarded client tokens are bearer tokens.
+- **Proof structure:** a COSE_Sign1 with `typ` (16) `"dpop-proof+cwt"`, an
+  asymmetric `alg` (ES256 required), and the client key as a COSE_Key in `kccs`
+  (14).
+- **Binding:** match the key to the token's `cnf`.
+  - `ckt` (5) is the RFC 9679 COSE Key Thumbprint, and relays MUST support it.
+  - `jkt` is the RFC 7638 JWK thumbprint of `crv`, `kty`, `x` and `y`, and
+    relays SHOULD support it.
+- **Freshness:** `ath` must be the SHA-256 of the token bytes as presented,
+  `iat` must fall within the `catdpop` window, and `cti` is used for replay
+  detection.
+- **Action match:** `actx` = `{0: "moqt", 1: action, ?2: namespace, ?3: track}`
+  must equal the request, so it can reuse `MoqtRequest`.
+
+- **Blockers:** the `actx` and `ath` claim keys are TBD. -02 publishes no
+  proof vectors, only token-side `cnf` vectors (A.4, which put `jkt` under key
+  323).
 
 ### Spec ambiguities to revisit as the draft evolves
 
 - Whether namespace and track matches apply to session and namespace actions.
-  The current implementation ignores them for session actions and ignores the
-  track match for namespace actions; see the `moqt` module docs.
-- How a server presents a token to a client for `SERVER_SETUP`.
-- The final IANA claim keys. 327 and 328 are taken from the test vectors.
+  -02 is still silent. The current implementation ignores them for SETUP and
+  ignores the track match for namespace actions (including SUBSCRIBE_TRACKS);
+  see the `moqt` module docs. The `actx` rule in -02 §4.2 points to the same
+  split: it carries the namespace for namespace and track actions, and the
+  track only for track actions.
+- The final IANA claim keys. The defaults, -65537 and -65538, are the -02 test
+  vectors' Private Use placeholders.
+
+### Draft -02 errata to report upstream
+
+- In §2.1.2, the "namespaces starting with ['example','com']" example uses the
+  map form `{ /exact/ 0: 'example.com' }`. The CDDL only allows a bare `bstr`
+  (this library rejects the map form).
+- Several §2.1.2 examples still label code 2 `/ANNOUNCE/`.
+- `moqt_admin_wildcard` (A.5) still lists actions `[0..8]` with the -01 names
+  ClientSetup and ServerSetup, and expects action 0 to pass. It also omits
+  SUBSCRIBE_TRACKS (9).
+- The IANA table gives `moqt-reval`'s key as `TBD_MOQT (1+2)` instead of
+  `TBD_MOQT_REVAL`.
+- §2.1.3 says `exp` 1750000000 is 2025-05-02T21:57:24Z. It is actually
+  2025-06-15T15:06:40Z.

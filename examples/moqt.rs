@@ -1,5 +1,5 @@
 //! Example: Common Access Tokens for Media over QUIC Transport (MoQT), as
-//! profiled by draft-ietf-moq-c4m.
+//! profiled by draft-ietf-moq-c4m-02.
 //!
 //! The `moqt` claim lists scopes: which MoQT actions a token permits, and on
 //! which Full Track Names (namespace tuple + track name). The same check
@@ -46,7 +46,7 @@ fn edge_relay_validates_subscriber() {
                 .with_expiration(current_timestamp() + 3600),
         )
         .moqt(MoqtClaim::new(vec![MoqtScope::new([
-            MoqtAction::ClientSetup,
+            MoqtAction::Setup,
             MoqtAction::Subscribe,
             MoqtAction::Fetch,
             MoqtAction::RequestUpdate,
@@ -74,7 +74,7 @@ fn edge_relay_validates_subscriber() {
             .moqt_request(request)
     };
     let requests = [
-        MoqtRequest::session(MoqtAction::ClientSetup),
+        MoqtRequest::session(MoqtAction::Setup),
         MoqtRequest::track(MoqtAction::Subscribe, ["example.com", "alice"], "video-hd"),
         MoqtRequest::track(MoqtAction::Subscribe, ["example.com", "bob"], "video-hd"),
         MoqtRequest::track(MoqtAction::Publish, ["example.com", "alice"], "video-hd"),
@@ -103,7 +103,7 @@ fn ingest_relay_validates_publisher() {
                 .with_expiration(current_timestamp() + 3600),
         )
         .moqt(MoqtClaim::new(vec![MoqtScope::new([
-            MoqtAction::ClientSetup,
+            MoqtAction::Setup,
             MoqtAction::PublishNamespace,
             MoqtAction::Publish,
         ])

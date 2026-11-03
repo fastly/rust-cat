@@ -81,24 +81,36 @@ pub mod match_types {
     pub const SHA512_256: i32 = -2;
 }
 
-/// MoQ Transport claim keys (draft-ietf-moq-c4m)
+/// MoQ Transport claim keys (draft-ietf-moq-c4m-02)
 ///
-/// These keys are **provisional**: IANA has not yet assigned them, and the
-/// values are taken from the draft's test vectors. They may change before the
-/// draft is published.
+/// These keys are **provisional**: IANA has not yet assigned `TBD_MOQT` and
+/// `TBD_MOQT_REVAL`. The values are the RFC 8392 Private Use placeholders that
+/// draft-ietf-moq-c4m-02's test vectors use, and they will change once IANA
+/// assigns real keys. Validators can override them with
+/// [`MoqtClaimLabels`](crate::MoqtClaimLabels).
 pub mod moqt_keys {
     /// MoQ Transport scope (moqt) claim key
-    pub const MOQT: i32 = 327;
+    pub const MOQT: i32 = -65537;
     /// MoQ Transport revalidation interval (moqt-reval) claim key
-    pub const MOQT_REVAL: i32 = 328;
+    pub const MOQT_REVAL: i32 = -65538;
 }
 
-/// MoQ Transport action codes for the moqt claim (draft-ietf-moq-c4m, Table 1)
+/// Keys of the moqt claim map (draft-ietf-moq-c4m-02, Section 2.1)
+///
+/// Every other key is reserved for future revisions of the draft. A claim that
+/// uses a key this library does not know is rejected.
+pub mod moqt_claim_keys {
+    /// The array of scopes
+    pub const SCOPES: i32 = 0;
+}
+
+/// MoQ Transport action codes for the moqt claim (draft-ietf-moq-c4m-02, Table 1)
+///
+/// Code 0 is not assigned. Draft -01 used 0 for CLIENT_SETUP and 1 for
+/// SERVER_SETUP. moq-transport-22 merged those two messages into SETUP.
 pub mod moqt_actions {
-    /// CLIENT_SETUP
-    pub const CLIENT_SETUP: i64 = 0;
-    /// SERVER_SETUP
-    pub const SERVER_SETUP: i64 = 1;
+    /// SETUP
+    pub const SETUP: i64 = 1;
     /// PUBLISH_NAMESPACE
     pub const PUBLISH_NAMESPACE: i64 = 2;
     /// SUBSCRIBE_NAMESPACE
@@ -113,6 +125,8 @@ pub mod moqt_actions {
     pub const FETCH: i64 = 7;
     /// TRACK_STATUS
     pub const TRACK_STATUS: i64 = 8;
+    /// SUBSCRIBE_TRACKS
+    pub const SUBSCRIBE_TRACKS: i64 = 9;
 }
 
 /// Binary match types for the moqt claim (a bare byte string is an exact match)
@@ -252,6 +266,8 @@ pub mod cwt_keys {
     pub const IAT: i32 = 6;
     /// CWT ID claim key
     pub const CTI: i32 = 7;
+    /// Confirmation (proof-of-possession key) claim key (RFC 8747)
+    pub const CNF: i32 = 8;
 }
 
 /// COSE header parameter labels

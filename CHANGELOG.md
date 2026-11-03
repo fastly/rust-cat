@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Media over QUIC (MoQ)** support for draft-ietf-moq-c4m-01:
+- **Media over QUIC (MoQ)** support for draft-ietf-moq-c4m-02 (only -02;
+  claims in draft -01's array form are rejected):
   - The `moqt` module with typed `MoqtClaim` / `MoqtScope` / `BinMatch` scopes,
-    `MoqtAction` codes, and `MoqtRequest`. Parsing is strict, and matching is
-    bytewise against Full Track Names.
+    `MoqtAction` codes (SETUP = 1 through SUBSCRIBE_TRACKS = 9), and
+    `MoqtRequest`. The claim is encoded as a map, `{0: [scopes...]}`. Parsing
+    is strict, and any other map key is rejected. Matching is bytewise against
+    Full Track Names.
   - `TokenBuilder::moqt` and `TokenBuilder::moqt_reval`.
   - `MoqtScope::matches_name`, the action-independent name matcher that
     `permits` uses, for re-checking namespaces and tracks against a scope.
@@ -22,10 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     labels, and `Token::moqt_claim_at` / `moqt_reval_at` read a claim at any
     label.
     With `verify_moqt`, tokens without a `moqt` claim are denied.
-  - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`, and
-    `Error::MoqtRevalidationUnsupported`.
-  - New constants `moqt_keys`, `moqt_actions`, and `moqt_match_types`. The claim
-    keys 327 and 328 are provisional, pending IANA.
+  - `VerificationOptions::moqt_dpop_verified`. With `verify_moqt`, tokens with
+    a `cnf` claim are denied unless the caller confirms it has verified the
+    DPoP proof.
+  - With `verify_moqt`, tokens with `catreplay` 1 (single connection) must
+    carry `cti` and `exp`.
+  - New errors `Error::InvalidMoqtClaim`, `Error::MoqtNotAuthorized`,
+    `Error::MoqtRevalidationUnsupported`, and `Error::MoqtDpopRequired`.
+  - New constants `moqt_keys`, `moqt_claim_keys`, `moqt_actions`,
+    `moqt_match_types`, and `cwt_keys::CNF`. The claim keys -65537 and -65538
+    are the draft's Private Use placeholders, pending IANA.
   - `examples/moqt.rs`.
 - `CborValue::Float`. Half, single, and double precision floats are decoded, and
   floats are encoded in the shortest exact width.

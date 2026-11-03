@@ -342,9 +342,32 @@ impl Token {
     /// Verify the MoQ Transport claims (moqt and moqt-reval) against the
     /// provided request and revalidation capability
     fn verify_moqt_claims(&self, options: &VerificationOptions) -> Result<(), Error> {
+        use crate::constants::{cat_keys, cwt_keys, replay_values};
+
         let request = options.moqt_request.as_ref().ok_or_else(|| {
             Error::InvalidClaimValue("No MoQ request provided for moqt verification".to_string())
         })?;
+
+        // draft-ietf-moq-c4m-02 §4.1: a token bound to a client key with cnf
+        // must not be accepted without a valid DPoP proof. This library does
+        // not verify proofs, so the caller must confirm it has.
+        if self.claims.custom.contains_key(&cwt_keys::CNF) && !options.moqt_dpop_verified {
+            return Err(Error::MoqtDpopRequired(format!(
+                "token has a cnf claim, so {request} needs a verified DPoP proof"
+            )));
+        }
+
+        // draft-ietf-moq-c4m-02 §3: under MoQ, catreplay 1 means
+        // single-connection use, and such a token must carry cti and exp.
+        if matches!(
+            self.claims.custom.get(&cat_keys::CATREPLAY),
+            Some(CborValue::Integer(v)) if *v == i64::from(replay_values::PROHIBITED)
+        ) && (self.claims.registered.cti.is_none() || self.claims.registered.exp.is_none())
+        {
+            return Err(Error::InvalidClaimValue(
+                "catreplay 1 (single connection) requires both cti and exp claims".to_string(),
+            ));
+        }
 
         let labels = options.moqt_claim_labels;
         if let Some(reval) = self.moqt_reval_at(labels.reval)? {
@@ -1286,6 +1309,11 @@ pub struct VerificationOptions {
     /// Verify CAT-specific replay protection (CATREPLAY)
     pub verify_catreplay: bool,
     /// Whether the token has been seen before (for replay protection)
+    ///
+    /// For MoQ (draft-ietf-moq-c4m-02 §3), `catreplay` 1 means single
+    /// *connection* use. A relay should set this only when the token's `cti`
+    /// was already accepted on a different connection. It should not set it
+    /// when a later action on the same connection presents the token again.
     pub token_seen_before: bool,
     /// Verify CAT-specific TLS Fingerprint claim (CATTPRINT) against provided Fingerprint Type and Value
     pub verify_cattprint: bool,
@@ -1295,7 +1323,9 @@ pub struct VerificationOptions {
     pub fingerprint_value: Option<String>,
     /// Verify MoQ Transport claims (moqt, moqt-reval) against `moqt_request`
     ///
-    /// Tokens without a moqt claim are denied.
+    /// Tokens without a moqt claim are denied. Tokens with a `cnf` claim are
+    /// denied unless `moqt_dpop_verified` is set. Tokens with `catreplay` 1
+    /// but no `cti` or no `exp` are rejected.
     pub verify_moqt: bool,
     /// MoQ request to verify against the moqt claim
     pub moqt_request: Option<MoqtRequest>,
@@ -1303,6 +1333,11 @@ pub struct VerificationOptions {
     pub moqt_revalidation: MoqtRevalidation,
     /// Labels under which the moqt and moqt-reval claims are read
     pub moqt_claim_labels: MoqtClaimLabels,
+    /// Whether the caller has verified the DPoP proof for this MoQ action
+    ///
+    /// This library does not verify DPoP proofs. Under `verify_moqt`, a token
+    /// with a `cnf` claim is rejected unless this is `true`.
+    pub moqt_dpop_verified: bool,
 }
 
 impl VerificationOptions {
@@ -1329,6 +1364,7 @@ impl VerificationOptions {
             moqt_request: None,
             moqt_revalidation: MoqtRevalidation::Unsupported,
             moqt_claim_labels: MoqtClaimLabels::default(),
+            moqt_dpop_verified: false,
         }
     }
 
@@ -1452,9 +1488,22 @@ impl VerificationOptions {
 
     /// Set the labels under which the moqt and moqt-reval claims are read
     ///
-    /// Defaults to the provisional labels 327 and 328 (see [`MoqtClaimLabels`]).
+    /// Defaults to the provisional labels -65537 and -65538 (see
+    /// [`MoqtClaimLabels`]).
     pub fn moqt_claim_labels(mut self, labels: MoqtClaimLabels) -> Self {
         self.moqt_claim_labels = labels;
+        self
+    }
+
+    /// Confirm that the DPoP proof accompanying this MoQ action was verified
+    ///
+    /// Under draft-ietf-moq-c4m-02 §4.1, a relay must not accept a token that
+    /// has a `cnf` claim unless the action comes with a valid DPoP proof. This
+    /// library does not verify DPoP proofs, so it rejects such tokens unless
+    /// the caller sets this. Set it only after you have performed every check
+    /// in §4.3.
+    pub fn moqt_dpop_verified(mut self, verified: bool) -> Self {
+        self.moqt_dpop_verified = verified;
         self
     }
 }

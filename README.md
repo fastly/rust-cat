@@ -412,10 +412,14 @@ The `cat_keys` module provides constants for all CAT-specific claim keys:
 ## Media over QUIC (MoQ) Tokens
 
 The `moqt` and `moqt-reval` claims from
-[draft-ietf-moq-c4m](https://datatracker.ietf.org/doc/draft-ietf-moq-c4m/)
+[draft-ietf-moq-c4m-02](https://datatracker.ietf.org/doc/draft-ietf-moq-c4m/02/)
 authorize MoQ Transport actions on specific Full Track Names (namespace tuple +
-track name). The claim keys (327, 328) are provisional and come from the draft's
-test vectors; they're exposed as `moqt_keys::MOQT` and `moqt_keys::MOQT_REVAL`.
+track name). Only draft -02 is supported. A `moqt` claim in draft -01's
+bare-array form is rejected, because -01 numbered its actions differently.
+
+The claim keys are provisional. IANA has not assigned them, so the library
+defaults to -65537 and -65538, the Private Use placeholders from the draft's
+test vectors. They're exposed as `moqt_keys::MOQT` and `moqt_keys::MOQT_REVAL`.
 To interoperate with an issuer that uses other labels before IANA assignment,
 set `VerificationOptions::moqt_claim_labels`, or read a claim with
 `Token::moqt_claim_at` / `moqt_reval_at`.
@@ -468,12 +472,13 @@ Notes for validators:
   should verify with an ES256/PS256 public key rather than holding an HMAC
   secret. Always use `verify_with_key` with a typed `VerifyingKey`, which
   rejects HMAC forgeries computed over a public key.
-- **Which matches apply.** Setup actions only check that the action is listed.
-  Namespace actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) also check the
-  namespace. Track actions also check the track, and are denied if no track is
+- **Which matches apply.** `SETUP` only checks that the action is listed.
+  Namespace actions (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`,
+  `SUBSCRIBE_TRACKS`) also check the namespace. Track actions also check the track, and are denied if no track is
   given. A request namespace shorter than the scope's is denied.
 - **Strict parsing.** A malformed `moqt` claim fails verification with
-  `Error::InvalidMoqtClaim`. It's never ignored.
+  `Error::InvalidMoqtClaim`. It's never ignored. This includes a claim map with
+  any key other than 0, which the draft reserves for future scope restrictions.
 - **Default-deny.** With `verify_moqt(true)`, a token with no `moqt` claim
   authorizes no MoQ action, as draft-ietf-moq-c4m §2 requires.
 - **Session-held tokens.** To check later actions (such as `REQUEST_UPDATE`)
@@ -484,6 +489,13 @@ Notes for validators:
   `verify_claims` at least every `token.moqt_reval()` seconds for ongoing actions.
   Recipients that can't revalidate leave `moqt_revalidation` at its default,
   `Unsupported`, and such tokens are rejected, as the draft requires.
+- **DPoP-bound tokens.** This library does not verify DPoP proofs yet. With
+  `verify_moqt(true)`, a token that has a `cnf` claim is rejected with
+  `Error::MoqtDpopRequired`. The exception is when you have verified the proof
+  yourself (draft -02 §4.3) and set `moqt_dpop_verified(true)`.
+- **Replay (`catreplay` 1).** For MoQ, value 1 means single-connection use, and
+  the token must carry `cti` and `exp`. Set `token_seen_before(true)` only when
+  the token's `cti` was already accepted on a *different* connection.
 - **Forwarding upstream.** Forward the raw token bytes you received.
   `to_bytes()` re-encodes the outer COSE structure.
 
