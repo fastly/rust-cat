@@ -201,6 +201,30 @@ COSE-native one, so the crate can now verify proofs without a JWT/JWK stack:
 - The final IANA claim keys. The defaults, -65537 and -65538, are the -02 test
   vectors' Private Use placeholders.
 
+### REQUEST_UPDATE on namespace subscriptions
+
+`MoqtAction::RequestUpdate` is a track action, so a `MoqtRequest` without a
+track name is always denied. In moq-transport-22, REQUEST_UPDATE can also
+update a namespace subscription (§9.5.2), and it can change the namespace
+prefix. A relay that checks such an update as `RequestUpdate` gets a denial
+even when the token allows it. This fails closed, but it blocks legitimate
+updates.
+
+- **Why deferred:** the spec doesn't say how this should be authorized; it's
+  tracked upstream in moq-wg/CAT-4-MOQT#49. Is the token checked against the
+  new prefix, the original one, or both? Does REQUEST_UPDATE need to be listed
+  as well as the original SUBSCRIBE_NAMESPACE / SUBSCRIBE_TRACKS action? Any
+  fix now would hard-code a guess.
+- **Workaround until then:** `permits` derives the target from the action, so
+  even `MoqtRequest::namespace(MoqtAction::RequestUpdate, ..)` is denied.
+  Instead, select the scopes whose `action_codes()` include both
+  REQUEST_UPDATE and the original action, and call
+  `MoqtScope::matches_name(new_prefix, None)` on them.
+- **Likely fix direction:** make `RequestUpdate`'s target depend on the
+  request: namespace-only when `track` is `None`, track otherwise. Then
+  require the new prefix to match a scope that permits both REQUEST_UPDATE and
+  the original action.
+
 ### Draft -02 errata to report upstream
 
 - In §2.1.2, the "namespaces starting with ['example','com']" example uses the
