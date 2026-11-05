@@ -37,12 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- ES256 signatures are now produced in canonical "low-S" form, and `verify`
-  rejects high-S (non-canonical) ECDSA signatures. ECDSA signatures are
-  malleable — for a valid `(r, s)`, the pair `(r, n - s)` verifies over the same
-  message — so without this a third party could derive a second valid signature
-  for an unchanged token. Requiring low-S makes the signature bytes a stable
-  identity for a token.
+- ES256 signatures are now produced in canonical "low-S" form, so tokens this
+  crate issues have one signature encoding and pass strict low-S verifiers.
+  Verification accepts both low-S and high-S signatures, because COSE doesn't
+  require low-S and many signers emit unnormalized RFC 6979 output (the
+  draft-ietf-moq-c4m-02 `token_es256` test vector is high-S). ECDSA signatures
+  are malleable — for a valid `(r, s)`, the pair `(r, n - s)` also verifies — so
+  signature bytes are not a unique token identity. Use `cti` or a payload hash
+  for replay and deduplication keys.
 - PS256 rejects RSA keys whose modulus is smaller than 2048 bits, on both the
   signing and verification paths. Smaller moduli (e.g. 512- or 1024-bit) are too
   weak to be secure — a 512-bit modulus is factorable on commodity hardware —

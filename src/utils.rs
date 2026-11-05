@@ -28,9 +28,8 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(
 /// The signature is normalized to "low-S" form. ECDSA signatures are malleable:
 /// for any valid `(r, s)`, the pair `(r, n - s)` is an equally valid signature
 /// over the same message. Emitting only low-S signatures yields a canonical
-/// encoding (each token has one signature) and interoperates with strict
-/// verifiers that reject high-S (e.g. WebCrypto and various COSE stacks). The
-/// matching `verify_es256` likewise rejects high-S.
+/// encoding for the tokens this crate issues, and interoperates with strict
+/// verifiers that reject high-S. `verify_es256` itself accepts both forms.
 pub fn compute_es256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
     use p256::ecdsa::{signature::Signer, Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
@@ -51,11 +50,16 @@ pub fn compute_es256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, Error> {
 /// `key` must be an SPKI DER-encoded P-256 public key. `signature` must be the
 /// fixed-length 64-byte COSE representation (`r || s`).
 ///
-/// High-S signatures are rejected. Because ECDSA signatures are malleable
-/// (`(r, s)` and `(r, n - s)` are both valid), accepting high-S would let a
-/// third party derive a second valid signature for an unchanged token without
-/// the private key. Requiring low-S makes the accepted signature canonical, so
-/// the signature bytes are safe to use as an identity/dedup key.
+/// Both low-S and high-S signatures are accepted. COSE (RFC 9053 §2.1) does not
+/// require low-S, and many signers emit unnormalized RFC 6979 output. One
+/// example is the `token_es256` test vector in draft-ietf-moq-c4m-02.
+/// Rejecting high-S would reject about half of such issuers' tokens.
+///
+/// ECDSA signatures are malleable: if `(r, s)` is valid, so is `(r, n - s)`.
+/// Anyone can therefore derive a second valid signature for an unchanged
+/// token without the private key. That doesn't let them change the claims,
+/// but the signature bytes are **not** a unique identity for a token. Use the
+/// `cti` claim, or a hash of the payload, for replay or deduplication keys.
 pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Error> {
     use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
     use p256::pkcs8::DecodePublicKey;
@@ -63,12 +67,6 @@ pub fn verify_es256(key: &[u8], data: &[u8], signature: &[u8]) -> Result<(), Err
     let verifying_key = VerifyingKey::from_public_key_der(key)
         .map_err(|e| Error::InvalidKey(format!("Invalid ES256 public key: {e}")))?;
     let signature = Signature::from_slice(signature).map_err(|_| Error::SignatureVerification)?;
-    // Reject high-S (non-canonical) signatures. `normalize_s` returns `Some`
-    // exactly when the signature is high-S, so a `Some` here means the input
-    // was malleable and must not be accepted.
-    if signature.normalize_s().is_some() {
-        return Err(Error::SignatureVerification);
-    }
     verifying_key
         .verify(data, &signature)
         .map_err(|_| Error::SignatureVerification)

@@ -2062,18 +2062,18 @@ fn test_es256_signatures_are_low_s() {
 }
 
 #[test]
-fn test_es256_high_s_signature_is_rejected() {
+fn test_es256_high_s_signature_is_accepted() {
     // ECDSA is malleable: given a valid (r, s) signature, (r, n - s) is an
-    // equally valid signature over the same message. A high-S twin must be
-    // rejected so the accepted signature is canonical and cannot be duplicated
-    // by a third party without the private key.
+    // equally valid signature over the same message. COSE doesn't require
+    // low-S, and many signers emit unnormalized RFC 6979 output, so verify
+    // accepts both forms. This crate still only *emits* low-S (see
+    // test_es256_signatures_are_low_s).
     use p256::ecdsa::Signature;
 
     let (private_key, public_key) = es256_keys();
     let data = b"es256 malleability check";
 
     let low_s_bytes = crate::utils::compute_es256(&private_key, data).expect("sign");
-    // Sanity: the freshly produced signature verifies and is low-S.
     crate::utils::verify_es256(&public_key, data, &low_s_bytes)
         .expect("canonical low-S signature should verify");
 
@@ -2081,26 +2081,55 @@ fn test_es256_high_s_signature_is_rejected() {
     let low_s = Signature::from_slice(&low_s_bytes).expect("64-byte signature");
     let (r, s) = low_s.split_scalars();
     let high_s = Signature::from_scalars(r, -s).expect("non-zero scalars");
-    // The twin really is the high-S form (normalize_s would flip it back).
     assert!(
         high_s.normalize_s().is_some(),
         "negated-s signature should be high-S"
     );
     let high_s_bytes = high_s.to_bytes().to_vec();
-    assert_ne!(
-        high_s_bytes, low_s_bytes,
-        "the malleable twin must differ from the canonical signature"
-    );
+    assert_ne!(high_s_bytes, low_s_bytes);
 
-    // The high-S twin is a mathematically valid ECDSA signature, but our
-    // verifier must reject it as non-canonical.
-    assert!(
-        matches!(
-            crate::utils::verify_es256(&public_key, data, &high_s_bytes),
-            Err(crate::error::Error::SignatureVerification)
-        ),
-        "high-S (malleable) signature must be rejected"
-    );
+    crate::utils::verify_es256(&public_key, data, &high_s_bytes)
+        .expect("high-S signature should verify");
+
+    // Malleability never lets the claims change: the high-S twin still fails
+    // over different data.
+    assert!(matches!(
+        crate::utils::verify_es256(&public_key, b"tampered", &high_s_bytes),
+        Err(crate::error::Error::SignatureVerification)
+    ));
+}
+
+#[test]
+fn test_es256_draft_moq_c4m_02_high_s_vector() {
+    // draft-ietf-moq-c4m-02 Appendix A.3 `token_es256`: a COSE_Sign1 token
+    // signed with deterministic RFC 6979 ES256 and not normalized, so its S is
+    // high. It must verify with the draft's published public key.
+    use p256::ecdsa::Signature;
+
+    let token_bytes = Hex::decode_to_vec(
+        "d28448a201261063434154a05849a401781868747470733a2f2f617574682e6578616d706c652e636f6d\
+         0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a65\
+         53f1005840ed8cf586f32ba410f2b3097642eb32255c8dc555e9e058c48084809df557887bc5ee4974a9\
+         ef5c4557c1557de799628b634cafaa1b74c936968e0c9c3a48f222",
+        None,
+    )
+    .unwrap();
+    // SPKI DER for the draft's ES256 test key (Appendix A.1)
+    let public_key = Hex::decode_to_vec(
+        "3059301306072a8648ce3d020106082a8648ce3d03010703420004\
+         60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6\
+         7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+        None,
+    )
+    .unwrap();
+
+    let token = Token::from_bytes(&token_bytes).expect("decode draft vector");
+    let signature = Signature::from_slice(&token_bytes[token_bytes.len() - 64..]).unwrap();
+    assert!(signature.normalize_s().is_some(), "vector should be high-S");
+    token
+        .verify(&public_key)
+        .expect("draft ES256 vector verifies");
+    assert_eq!(token.issuer(), Some("https://auth.example.com"));
 }
 
 /// Regression test for the COSE protected-header interop bug.
