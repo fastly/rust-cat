@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- `CborValue::Tag(u64, Box<CborValue>)`. CBOR tags (major type 6) are now decoded
+  and encoded anywhere in header and claim values. Previously, any token whose
+  claims contained a tag failed with "Unsupported CBOR type in array: Tag". That
+  included every RFC 9164 tagged `catnip` claim, and the draft-ietf-moq-c4m-02
+  test vectors `token_hmac_full` and `composite_and`.
+- `catnip::NetworkIdentifier` (address, prefix, ASN, ASN range), with `parse`,
+  `prefix`, `to_cbor` and `from_cbor`, plus `catnip::from_identifiers` and
+  `catnip::parse` for reading a whole claim. `catnip::TAG_IPV4` (52) and
+  `catnip::TAG_IPV6` (54) are the RFC 9164 tags.
+
+### Changed
+
+- **BREAKING:** `catnip::create` and `catnip::single` now encode IP addresses and
+  prefixes as RFC 9164 tagged values (for example `52([8, h'0a'])` for
+  `10.0.0.0/8`), and ASNs as integers. This matches other CAT implementations
+  and the draft-ietf-moq-c4m-02 test vectors. Before, they emitted text strings
+  such as `"10.0.0.0/8"`. Both functions now return `Result`, because input is
+  parsed and validated. Prefix host bits are cleared.
+- **BREAKING:** `CborValue` is now `#[non_exhaustive]` and has the new `Tag`
+  variant.
+- The array and map decoders share one value decoder, so the same CBOR types
+  are accepted in both.
+
 ## [0.3.0] - Unreleased
 
 ### Added

@@ -157,3 +157,5 @@ pub use minicbor;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cbor_tags;

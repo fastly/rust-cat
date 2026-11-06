@@ -1584,6 +1584,10 @@ fn encode_cbor_value(value: &CborValue, enc: &mut Encoder<&mut Vec<u8>>) -> Resu
         CborValue::Null => {
             enc.null()?;
         }
+        CborValue::Tag(tag, inner) => {
+            enc.tag(minicbor::data::Tag::new(*tag))?;
+            encode_cbor_value(inner, enc)?;
+        }
     }
     Ok(())
 }
@@ -1604,64 +1608,44 @@ fn decode_map(bytes: &[u8]) -> Result<HeaderMap, Error> {
     decode_map_direct(&mut dec)
 }
 
+/// Decode a single CBOR value of any supported type
+fn decode_value(dec: &mut Decoder<'_>) -> Result<CborValue, Error> {
+    use minicbor::data::Type;
+
+    let datatype = dec.datatype()?;
+    let value = match datatype {
+        // Values above i64::MAX wrap, as before; rejecting them is a separate
+        // change
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 => CborValue::Integer(dec.u64()? as i64),
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Int => CborValue::Integer(dec.i64()?),
+        Type::Bytes => CborValue::Bytes(dec.bytes()?.to_vec()),
+        Type::String => CborValue::Text(dec.str()?.to_string()),
+        Type::Map => CborValue::Map(decode_map_direct(dec)?),
+        Type::Array => CborValue::Array(decode_array(dec)?),
+        Type::Null => {
+            dec.null()?;
+            CborValue::Null
+        }
+        Type::Tag => {
+            let tag = dec.tag()?;
+            CborValue::Tag(tag.as_u64(), Box::new(decode_value(dec)?))
+        }
+        _ => {
+            return Err(Error::InvalidFormat(format!(
+                "Unsupported CBOR type: {datatype:?}"
+            )))
+        }
+    };
+    Ok(value)
+}
+
 /// Decode a CBOR array
 fn decode_array(dec: &mut Decoder<'_>) -> Result<Vec<CborValue>, Error> {
     let array_len = dec.array()?.unwrap_or(0);
     let mut array = Vec::with_capacity(array_len as usize);
 
     for _ in 0..array_len {
-        // Try to decode based on the datatype
-        let datatype = dec.datatype()?;
-
-        // Handle each type separately
-        let value = if datatype == minicbor::data::Type::Int {
-            // Integer value
-            let i = dec.i64()?;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::U8
-            || datatype == minicbor::data::Type::U16
-            || datatype == minicbor::data::Type::U32
-            || datatype == minicbor::data::Type::U64
-        {
-            // Unsigned integer value
-            let i = dec.u64()? as i64;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::I8
-            || datatype == minicbor::data::Type::I16
-            || datatype == minicbor::data::Type::I32
-            || datatype == minicbor::data::Type::I64
-        {
-            // Signed integer value
-            let i = dec.i64()?;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::Bytes {
-            // Byte string
-            let b = dec.bytes()?;
-            CborValue::Bytes(b.to_vec())
-        } else if datatype == minicbor::data::Type::String {
-            // Text string
-            let s = dec.str()?;
-            CborValue::Text(s.to_string())
-        } else if datatype == minicbor::data::Type::Map {
-            // Nested map
-            let nested_map = decode_map_direct(dec)?;
-            CborValue::Map(nested_map)
-        } else if datatype == minicbor::data::Type::Array {
-            // Nested array
-            let nested_array = decode_array(dec)?;
-            CborValue::Array(nested_array)
-        } else if datatype == minicbor::data::Type::Null {
-            // Null value
-            dec.null()?;
-            CborValue::Null
-        } else {
-            // Unsupported type
-            return Err(Error::InvalidFormat(format!(
-                "Unsupported CBOR type in array: {datatype:?}"
-            )));
-        };
-
-        array.push(value);
+        array.push(decode_value(dec)?);
     }
 
     Ok(array)
@@ -1673,58 +1657,7 @@ fn decode_map_direct(dec: &mut Decoder<'_>) -> Result<HeaderMap, Error> {
 
     for _ in 0..map_len {
         let key = dec.i32()?;
-
-        // Try to decode based on the datatype
-        let datatype = dec.datatype()?;
-
-        // Handle each type separately
-        let value = if datatype == minicbor::data::Type::Int {
-            // Integer value
-            let i = dec.i64()?;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::U8
-            || datatype == minicbor::data::Type::U16
-            || datatype == minicbor::data::Type::U32
-            || datatype == minicbor::data::Type::U64
-        {
-            // Unsigned integer value
-            let i = dec.u64()? as i64;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::I8
-            || datatype == minicbor::data::Type::I16
-            || datatype == minicbor::data::Type::I32
-            || datatype == minicbor::data::Type::I64
-        {
-            // Signed integer value
-            let i = dec.i64()?;
-            CborValue::Integer(i)
-        } else if datatype == minicbor::data::Type::Bytes {
-            // Byte string
-            let b = dec.bytes()?;
-            CborValue::Bytes(b.to_vec())
-        } else if datatype == minicbor::data::Type::String {
-            // Text string
-            let s = dec.str()?;
-            CborValue::Text(s.to_string())
-        } else if datatype == minicbor::data::Type::Map {
-            // Nested map
-            let nested_map = decode_map_direct(dec)?;
-            CborValue::Map(nested_map)
-        } else if datatype == minicbor::data::Type::Array {
-            // Array
-            let array = decode_array(dec)?;
-            CborValue::Array(array)
-        } else if datatype == minicbor::data::Type::Null {
-            // Null value
-            dec.null()?;
-            CborValue::Null
-        } else {
-            // Unsupported type
-            return Err(Error::InvalidFormat(format!(
-                "Unsupported CBOR type: {datatype:?}"
-            )));
-        };
-
+        let value = decode_value(dec)?;
         map.insert(key, value);
     }
 
