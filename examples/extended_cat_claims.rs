@@ -51,7 +51,7 @@ fn main() {
         )
         .custom_array(
             cat_keys::CATNIP,
-            catnip::create(vec!["192.168.1.0/24", "10.0.0.0/8"]),
+            catnip::create(vec!["192.168.1.0/24", "10.0.0.0/8"]).expect("valid catnip entries"),
         )
         .sign(key)
         .expect("Failed to sign token");
@@ -203,7 +203,10 @@ fn main() {
         )
         .custom_cbor(cat_keys::CATV, catv::with_version(1))
         .custom_cbor(cat_keys::CATPOR, catpor::create(10))
-        .custom_array(cat_keys::CATNIP, catnip::single("203.0.113.0/24"))
+        .custom_array(
+            cat_keys::CATNIP,
+            catnip::single("203.0.113.0/24").expect("valid catnip entry"),
+        )
         .custom_array(cat_keys::CATALPN, catalpn::create(vec!["h2", "http/1.1"]))
         .custom_array(cat_keys::CATGEOISO3166, catgeoiso3166::create(vec!["US"]))
         .sign(key)

@@ -219,8 +219,16 @@ impl KeyId {
 /// let mut map = BTreeMap::new();
 /// map.insert(1, CborValue::Text("nested value".to_string()));
 /// let map_value = CborValue::Map(map);
+///
+/// // Tagged value: an RFC 9164 IPv4 address, as used by the catnip claim
+/// let tagged = CborValue::Tag(52, Box::new(CborValue::Bytes(vec![192, 0, 2, 1])));
 /// ```
+///
+/// This enum is marked `#[non_exhaustive]`: new CBOR value kinds can be added
+/// without a breaking change, so downstream `match` expressions must include a
+/// wildcard arm.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CborValue {
     /// Integer value (signed 64-bit integer)
     Integer(i64),
@@ -234,6 +242,11 @@ pub enum CborValue {
     Array(Vec<CborValue>),
     /// Null value
     Null,
+    /// Tagged value (CBOR major type 6): a tag number and the value it wraps
+    ///
+    /// Tags can appear anywhere in a claim value. For example, `catnip`
+    /// encodes IP addresses with the RFC 9164 tags 52 (IPv4) and 54 (IPv6).
+    Tag(u64, Box<CborValue>),
 }
 
 /// Type alias for header maps

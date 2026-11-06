@@ -459,32 +459,256 @@ pub mod catpor {
     }
 }
 
-/// Helper functions for creating CATNIP (Common Access Token Network IP) claims
+/// Helper functions for creating and reading CATNIP (Common Access Token
+/// Network IP) claims
 ///
-/// CATNIP restricts the IP addresses from which the token can be used.
+/// CATNIP restricts the networks from which the token can be used. The claim
+/// is an array of network identifiers:
+///
+/// - **IP addresses and prefixes** use the RFC 9164 tags: 52 for IPv4 and 54
+///   for IPv6. An address is a tagged byte string, such as
+///   `52(h'c0a80164')` for `192.168.1.100`. A prefix is a tagged
+///   `[prefix-length, address]` array whose address has trailing zero bytes
+///   removed, such as `52([8, h'0a'])` for `10.0.0.0/8`.
+/// - **Autonomous system numbers** are plain unsigned integers.
+///
+/// # Example
+///
+/// ```
+/// use common_access_token::{catnip, CborValue};
+///
+/// let claim = catnip::create(vec!["192.168.1.100", "10.0.0.0/8", "64512"]).unwrap();
+/// assert_eq!(
+///     claim[1],
+///     CborValue::Tag(52, Box::new(CborValue::Array(vec![
+///         CborValue::Integer(8),
+///         CborValue::Bytes(vec![10]),
+///     ])))
+/// );
+///
+/// let parsed = catnip::parse(&CborValue::Array(claim)).unwrap();
+/// assert_eq!(parsed[2], catnip::NetworkIdentifier::Asn(64512));
+/// ```
 pub mod catnip {
     use super::*;
+    use crate::error::Error;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    /// Creates a CATNIP claim with a list of allowed IP addresses or ranges
+    /// RFC 9164 tag for IPv4 addresses and prefixes
+    pub const TAG_IPV4: u64 = 52;
+    /// RFC 9164 tag for IPv6 addresses and prefixes
+    pub const TAG_IPV6: u64 = 54;
+
+    /// One entry of a CATNIP claim
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NetworkIdentifier {
+        /// A single IP address
+        Address(IpAddr),
+        /// An IP prefix: the network address and the prefix length in bits.
+        /// Host bits are always zero.
+        Prefix(IpAddr, u8),
+        /// An autonomous system number
+        Asn(u32),
+        /// An inclusive range of autonomous system numbers, encoded as
+        /// `[first, last]`. It appears in the CAT test vectors of
+        /// draft-ietf-moq-c4m-02, Appendix A.2.
+        AsnRange(u32, u32),
+    }
+
+    impl NetworkIdentifier {
+        /// Parse an address (`192.0.2.1`, `2001:db8::1`), a prefix
+        /// (`10.0.0.0/8`, `2001:db8::/32`), or an ASN (`64512`)
+        ///
+        /// A prefix's host bits are cleared, so `10.1.2.3/8` becomes
+        /// `10.0.0.0/8`.
+        pub fn parse(s: &str) -> Result<Self, Error> {
+            let invalid = || Error::InvalidClaimValue(format!("invalid catnip entry: {s:?}"));
+            if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+                return s.parse().map(Self::Asn).map_err(|_| invalid());
+            }
+            match s.split_once('/') {
+                None => s.parse().map(Self::Address).map_err(|_| invalid()),
+                Some((addr, len)) => {
+                    let addr: IpAddr = addr.parse().map_err(|_| invalid())?;
+                    let len: u8 = len.parse().map_err(|_| invalid())?;
+                    Self::prefix(addr, len)
+                }
+            }
+        }
+
+        /// Build a prefix, clearing host bits
+        pub fn prefix(addr: IpAddr, len: u8) -> Result<Self, Error> {
+            let max = if addr.is_ipv4() { 32 } else { 128 };
+            if len > max {
+                return Err(Error::InvalidClaimValue(format!(
+                    "catnip prefix length {len} exceeds {max}"
+                )));
+            }
+            let mut bytes = ip_bytes(addr);
+            mask(&mut bytes, len);
+            Ok(Self::Prefix(ip_from_bytes(addr.is_ipv4(), &bytes), len))
+        }
+
+        /// Encode this entry as a CBOR value
+        pub fn to_cbor(&self) -> CborValue {
+            match *self {
+                Self::Address(addr) => {
+                    CborValue::Tag(ip_tag(addr), Box::new(CborValue::Bytes(ip_bytes(addr))))
+                }
+                Self::Prefix(addr, len) => {
+                    let mut bytes = ip_bytes(addr);
+                    while bytes.last() == Some(&0) {
+                        bytes.pop();
+                    }
+                    CborValue::Tag(
+                        ip_tag(addr),
+                        Box::new(CborValue::Array(vec![
+                            CborValue::Integer(i64::from(len)),
+                            CborValue::Bytes(bytes),
+                        ])),
+                    )
+                }
+                Self::Asn(asn) => CborValue::Integer(i64::from(asn)),
+                Self::AsnRange(first, last) => CborValue::Array(vec![
+                    CborValue::Integer(i64::from(first)),
+                    CborValue::Integer(i64::from(last)),
+                ]),
+            }
+        }
+
+        /// Decode one CATNIP entry
+        ///
+        /// The RFC 9164 interface form (`[address, prefix-length]`, with the
+        /// address first) is rejected, because it isn't a network identifier.
+        /// So are prefixes with host bits set.
+        pub fn from_cbor(value: &CborValue) -> Result<Self, Error> {
+            let invalid =
+                |why: &str| Error::InvalidClaimValue(format!("invalid catnip entry: {why}"));
+            match value {
+                CborValue::Integer(asn) => u32::try_from(*asn)
+                    .map(Self::Asn)
+                    .map_err(|_| invalid("ASN out of range")),
+                CborValue::Array(range) => match range.as_slice() {
+                    [CborValue::Integer(a), CborValue::Integer(b)] => {
+                        let (a, b) = (
+                            u32::try_from(*a).map_err(|_| invalid("ASN out of range"))?,
+                            u32::try_from(*b).map_err(|_| invalid("ASN out of range"))?,
+                        );
+                        if a > b {
+                            return Err(invalid("ASN range is reversed"));
+                        }
+                        Ok(Self::AsnRange(a, b))
+                    }
+                    _ => Err(invalid("expected an ASN range [first, last]")),
+                },
+                CborValue::Tag(tag @ (TAG_IPV4 | TAG_IPV6), inner) => {
+                    let v4 = *tag == TAG_IPV4;
+                    let size = if v4 { 4 } else { 16 };
+                    match inner.as_ref() {
+                        CborValue::Bytes(b) if b.len() == size => {
+                            Ok(Self::Address(ip_from_bytes(v4, b)))
+                        }
+                        CborValue::Array(parts) => match parts.as_slice() {
+                            [CborValue::Integer(len), CborValue::Bytes(b)] => {
+                                let len = u8::try_from(*len)
+                                    .ok()
+                                    .filter(|l| usize::from(*l) <= size * 8)
+                                    .ok_or_else(|| invalid("prefix length out of range"))?;
+                                if b.len() > size {
+                                    return Err(invalid("prefix address too long"));
+                                }
+                                let mut bytes = b.clone();
+                                bytes.resize(size, 0);
+                                let mut masked = bytes.clone();
+                                mask(&mut masked, len);
+                                if masked != bytes {
+                                    return Err(invalid("prefix has host bits set"));
+                                }
+                                Ok(Self::Prefix(ip_from_bytes(v4, &bytes), len))
+                            }
+                            [CborValue::Bytes(_), CborValue::Integer(_)] => {
+                                Err(invalid("RFC 9164 interface form is not supported"))
+                            }
+                            _ => Err(invalid("malformed IP prefix")),
+                        },
+                        _ => Err(invalid("malformed IP address")),
+                    }
+                }
+                _ => Err(invalid("unsupported value")),
+            }
+        }
+    }
+
+    fn ip_tag(addr: IpAddr) -> u64 {
+        if addr.is_ipv4() {
+            TAG_IPV4
+        } else {
+            TAG_IPV6
+        }
+    }
+
+    fn ip_bytes(addr: IpAddr) -> Vec<u8> {
+        match addr {
+            IpAddr::V4(a) => a.octets().to_vec(),
+            IpAddr::V6(a) => a.octets().to_vec(),
+        }
+    }
+
+    /// Build an address from full-length bytes
+    fn ip_from_bytes(v4: bool, b: &[u8]) -> IpAddr {
+        if v4 {
+            let o: [u8; 4] = b.try_into().expect("4 bytes");
+            IpAddr::V4(Ipv4Addr::from(o))
+        } else {
+            let o: [u8; 16] = b.try_into().expect("16 bytes");
+            IpAddr::V6(Ipv6Addr::from(o))
+        }
+    }
+
+    /// Clear every bit after the first `len`
+    fn mask(bytes: &mut [u8], len: u8) {
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            let keep = (usize::from(len)).saturating_sub(i * 8).min(8);
+            *byte &= !(0xffu8.checked_shr(keep as u32).unwrap_or(0));
+        }
+    }
+
+    /// Creates a CATNIP claim from addresses, prefixes, and ASNs
+    ///
+    /// Each entry is parsed with [`NetworkIdentifier::parse`].
     ///
     /// # Example
     ///
     /// ```
     /// use common_access_token::cat_claims::catnip;
     ///
-    /// // Allow specific IP addresses
-    /// let catnip_claim = catnip::create(vec!["192.168.1.100", "10.0.0.0/8"]);
+    /// let catnip_claim = catnip::create(vec!["192.168.1.100", "10.0.0.0/8"]).unwrap();
     /// ```
-    pub fn create(ip_addresses: Vec<&str>) -> Vec<CborValue> {
-        ip_addresses
+    pub fn create(entries: Vec<&str>) -> Result<Vec<CborValue>, Error> {
+        entries
             .into_iter()
-            .map(|ip| CborValue::Text(ip.to_string()))
+            .map(|e| NetworkIdentifier::parse(e).map(|id| id.to_cbor()))
             .collect()
     }
 
-    /// Creates a CATNIP claim with a single IP address
-    pub fn single(ip_address: &str) -> Vec<CborValue> {
-        vec![CborValue::Text(ip_address.to_string())]
+    /// Creates a CATNIP claim with a single address, prefix, or ASN
+    pub fn single(entry: &str) -> Result<Vec<CborValue>, Error> {
+        create(vec![entry])
+    }
+
+    /// Creates a CATNIP claim from typed network identifiers
+    pub fn from_identifiers(ids: &[NetworkIdentifier]) -> Vec<CborValue> {
+        ids.iter().map(NetworkIdentifier::to_cbor).collect()
+    }
+
+    /// Parses a CATNIP claim value (an array of network identifiers)
+    pub fn parse(value: &CborValue) -> Result<Vec<NetworkIdentifier>, Error> {
+        match value {
+            CborValue::Array(entries) => entries.iter().map(NetworkIdentifier::from_cbor).collect(),
+            _ => Err(Error::InvalidClaimValue(
+                "catnip claim must be an array".to_string(),
+            )),
+        }
     }
 }
 
